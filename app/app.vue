@@ -53,11 +53,11 @@
           <label class="block text-[9px] text-[#A0A0A0] uppercase tracking-widest text-left mb-1 ml-1">Passcode</label>
           <div class="relative flex items-center">
             <input 
-              v-model="loginInput" 
+              v-model="Input" 
               :type="showPassword ? 'text' : 'password'" 
               placeholder="••••••"
               class="w-full border-b border-[#EEEBE5] py-3 text-center text-lg tracking-[0.5em] outline-none focus:border-[#333333] transition-all placeholder:text-[#F0F0F0] bg-transparent"
-              @keyup.enter="handleLogin"
+              @keyup.enter="handle"
             />
             <button @click="showPassword = !showPassword" type="button" class="absolute right-0 p-2 text-[#CCCCCC] hover:text-[#777777]" tabindex="-1">
               <svg v-if="!showPassword" class="w-4 h-4" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg"><path fill="currentColor" d="M876.8 156.8c0-9.6-3.2-16-9.6-22.4s-12.8-9.6-22.4-9.6-16 3.2-22.4 9.6L736 220.8c-64-32-137.6-51.2-224-60.8-160 16-288 73.6-377.6 176S0 496 0 512s48 73.6 134.4 176c22.4 25.6 44.8 48 73.6 67.2l-86.4 89.6c-6.4 6.4-9.6 12.8-9.6 22.4s3.2 16 9.6 22.4 12.8 9.6 22.4 9.6 16-3.2 22.4-9.6l704-710.4c3.2-6.4 6.4-12.8 6.4-22.4m-646.4 528Q115.2 579.2 76.8 512q43.2-72 153.6-172.8C304 272 400 230.4 512 224c64 3.2 124.8 19.2 176 44.8l-54.4 54.4C598.4 300.8 560 288 512 288c-64 0-115.2 22.4-160 64s-64 96-64 160c0 48 12.8 89.6 35.2 124.8L256 707.2c-9.6-6.4-19.2-16-25.6-22.4m140.8-96Q352 555.2 352 512c0-44.8 16-83.2 48-112s67.2-48 112-48c28.8 0 54.4 6.4 73.6 19.2zM889.599 336c-12.8-16-28.8-28.8-41.6-41.6l-48 48c73.6 67.2 124.8 124.8 150.4 169.6q-43.2 72-153.6 172.8c-73.6 67.2-172.8 108.8-284.8 115.2-51.2-3.2-99.2-12.8-140.8-28.8l-48 48c57.6 22.4 118.4 38.4 188.8 44.8 160-16 288-73.6 377.6-176S1024 528 1024 512s-48.001-73.6-134.401-176"></path></svg>
@@ -322,35 +322,49 @@ const handleLoginSuccess = (user) => {
 };
 
 // 3. 登入邏輯
-const handleLogin = async (manualSheetId = null) => {
+const handleLogin = async () => {
   let code = loginInput.value.trim().toLowerCase();
   let sheetId = loginSheetId.value.trim();  
 
-  // 2. 智慧偵測：如果使用者把 ID 貼進了 Code 框
-  if (code.length > 30) {
-    sheetId = code; 
-    loginInput.value = ''; // 清空代碼框讓使用者補填密鑰
-    alert('偵測到試算表 ID，請輸入對應的登入代碼');
-    return;
-  }
-
-  if (!code) return alert('請輸入代碼');
+  if (!code || !sheetId) return alert('請輸入登入代碼與 Google Sheet ID');
 
   try {
-    showToast('驗證中...');
-    const response = await $fetch('/api/auth', {
-      method: 'POST',
-      body: { 
-        code: code,
-        // 如果 sheetId 有填就傳，沒填就傳空，後端會自動判斷
-        sheet_id: sheetId || null
-      }
+    showToast('正在連線至雲端資料庫...');
+
+    // 💡 關鍵：直接請求公開的 JSON 資料格式
+    // 注意：sheet=User_Registry 必須與你分頁名稱完全一致
+    const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=User_Registry`;
+    
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('無法讀取試算表，請檢查 ID 是否正確或權限是否開啟');
+    
+    const text = await res.text();
+    // 處理 Google 回傳的 "google.visualization.Query.setResponse(...)" 格式
+    const jsonData = JSON.parse(text.substring(47, text.length - 2));
+    const rows = jsonData.table.rows;
+
+    // 💡 根據你的欄位順序比對 login_code (索引 4)
+    const userRow = rows.find(row => {
+      const cellValue = row.c[4]?.v; // 第 5 欄
+      return cellValue && cellValue.toString().toLowerCase() === code;
     });
-    if (response.success && response.user) {
-      handleLoginSuccess(response.user);
+
+    if (userRow) {
+      // 提取資料 (c[0]=id, c[1]=name, c[3]=role)
+      const user = {
+        id: userRow.c[0]?.v || '',
+        name: userRow.c[1]?.v || '',
+        role: userRow.c[3]?.v || 'student',
+        sheet_id: sheetId
+      };
+      
+      handleLoginSuccess(user);
+    } else {
+      alert('登入失敗：找不到匹配的登入代碼');
     }
   } catch (e) {
-    alert(e.data?.message || '密鑰錯誤');
+    console.error('Login Error:', e);
+    alert('登入發生錯誤：' + (e.message || '請檢查網路或試算表權限'));
   }
 };
 
