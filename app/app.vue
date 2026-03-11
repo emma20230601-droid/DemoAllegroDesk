@@ -53,7 +53,7 @@
           <label class="block text-[9px] text-[#A0A0A0] uppercase tracking-widest text-left mb-1 ml-1">Passcode</label>
           <div class="relative flex items-center">
             <input 
-              v-model="Input" 
+              v-model="loginInput" 
               :type="showPassword ? 'text' : 'password'" 
               placeholder="••••••"
               class="w-full border-b border-[#EEEBE5] py-3 text-center text-lg tracking-[0.5em] outline-none focus:border-[#333333] transition-all placeholder:text-[#F0F0F0] bg-transparent"
@@ -324,6 +324,7 @@ const handleLoginSuccess = (user) => {
 // 3. 登入邏輯
 const handleLogin = async () => {
   let code = loginInput.value.trim().toLowerCase();
+  
   let sheetId = loginSheetId.value.trim();  
 console.log("code=",code);
   console.log("sheetId=",sheetId);
