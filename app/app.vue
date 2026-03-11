@@ -326,7 +326,7 @@ const handleLogin = async () => {
   let code = loginInput.value.trim().toLowerCase();
   let sheetId = loginSheetId.value.trim();  
 
-  if (!code || !sheetId) return alert('請輸入登入代碼與 Google Sheet ID');
+  if (!code || !sheetId) return showToast('請輸入登入代碼與 Google Sheet ID');
 
   try {
     showToast('正在連線至雲端資料庫...');
