@@ -604,66 +604,60 @@ const fetchSessions = async () => {
   const currentStudentId = config.student_id;
   const currentRole = config.role;
 
-  // 3. 安全檢查：如果 targetSheetId 是空的，就不往下跑
+  // 3. 安全檢查
   if (!targetSheetId || targetSheetId === 'undefined') {
     loading.value = false;
     return;
   }
 
+  const gasUrl = localStorage.getItem('user_gas_url'); // 💡 取得 GAS 網址
+
   loading.value = true;
 
   try {
-    const queryId = currentStudentId;
-      
-    const fetchTasks = [
-      $fetch('/api/gsheet-fetch', { 
-        params: { 
-          studentId: currentStudentId, 
-          sheetId: targetSheetId, 
-          range: 'Sessions!A2:I' 
-        } 
-      }),
-      $fetch('/api/gsheet-fetch', { 
-        params: { 
-          studentId: currentStudentId, 
-          sheetId: targetSheetId, 
-          range: 'QuizResults!A2:G' 
-        } 
-      })
-    ];
+    // 💡 替代原本的 $fetch，改由 GAS 抓取資料以避開 Vercel 的 400 錯誤
+    const fetchFromGAS = async (sheetName) => {
+      if (!gasUrl) throw new Error("缺少 GAS URL 設定");
+      const response = await fetch(gasUrl, {
+        method: 'POST',
+        body: JSON.stringify({ 
+          action: 'fetch_data', 
+          sheetName: sheetName 
+        })
+      });
+      const res = await response.json();
+      return res.success ? res.data : [];
+    };
 
-    const [sessionResponse, resultsResponse] = await Promise.all(fetchTasks);
+    // 4. ✨ 核心修改點：將 $fetch 換成 fetchFromGAS，但保留對應的變數名稱
+    const [sessionResponse, resultsResponse] = await Promise.all([
+      fetchFromGAS('Sessions'),
+      fetchFromGAS('QuizResults')
+    ]);
+
+    // 保持原本的解構邏輯，確保相容性
     const rawRows = Array.isArray(sessionResponse) ? sessionResponse : (sessionResponse.data || []);
     const rawResults = Array.isArray(resultsResponse) ? resultsResponse : (resultsResponse.data || []);
 
-    // --- 1. 回數統一計算邏輯 ---
-   // --- 修正後的統計邏輯：針對單一 Session 計次 ---
-const sessionIterationMap = {};
+    // --- 1. 回數統一計算邏輯 (維持原設計) ---
+    const sessionIterationMap = {};
+    rawResults.forEach(res => {
+      const sid = String(res.sessionId || res.SessionID || '').trim();
+      if (!sid || sid === 'undefined') return;
+      sessionIterationMap[sid] = (sessionIterationMap[sid] || 0) + 1;
+    });
 
-rawResults.forEach(res => {
-  // 1. 抓取 sessionId (這是最準確的唯一標記)
-  const sid = String(res.sessionId || res.SessionID || '').trim();
-  
-  if (!sid || sid === 'undefined') return;
+    sessionIterations.value = sessionIterationMap;
+    console.log('單一測驗次數對照表:', sessionIterationMap);
 
-  // 2. 只要 sid 一樣，就代表是「同一個測驗入口」的紀錄，直接累加
-  // 這樣 SID-1772... 就只會算它自己的次數，不會跟別人併算
-  sessionIterationMap[sid] = (sessionIterationMap[sid] || 0) + 1;
-});
-
-// 更新到響應式變數
-sessionIterations.value = sessionIterationMap;
-
-console.log('單一測驗次數對照表:', sessionIterationMap);
-
-    // --- 2. 過濾邏輯 ---
+    // --- 2. 過濾邏輯 (維持原設計) ---
     const myId = (currentStudentId || '').trim().toLowerCase();
     const processedRows = rawRows.filter(s => {
       const rowSid = String(s.studentId || s.student_id || s.StudentId || '').trim().toLowerCase();
       return rowSid === myId;
     });
 
-    // --- 3. 成績處理 ---
+    // --- 3. 成績處理 (維持原設計) ---
     const completedSet = new Set();
     const scoresMap = {};
     rawResults.forEach(res => {
@@ -677,70 +671,66 @@ console.log('單一測驗次數對照表:', sessionIterationMap);
     completedTopics.value = completedSet;
     quizScores.value = scoresMap;
 
-   // --- 4. 資料轉化 (僅修改此區塊的題數判斷邏輯) ---
-if (processedRows.length >= 0) {
-  sessions.value = processedRows.map(s => {
-    const student_id_val = s.studentId || s.student_id || '';
-    
-    // 處理重點文字格式
-    const rawPoints = s.Points || '';
-    let parsedPoints = [];
-    try {
-      if (typeof rawPoints === 'string' && rawPoints.startsWith('[')) {
-        parsedPoints = JSON.parse(rawPoints);
-      } else if (rawPoints) {
-        parsedPoints = String(rawPoints).split('\n').filter(p => p.trim());
-      }
-    } catch (e) { parsedPoints = [rawPoints]; }
+    // --- 4. 資料轉化 (維持原設計，包含題數判斷) ---
+    if (processedRows.length >= 0) {
+      sessions.value = processedRows.map(s => {
+        const student_id_val = s.studentId || s.student_id || '';
+        
+        const rawPoints = s.Points || '';
+        let parsedPoints = [];
+        try {
+          if (typeof rawPoints === 'string' && rawPoints.startsWith('[')) {
+            parsedPoints = JSON.parse(rawPoints);
+          } else if (rawPoints) {
+            parsedPoints = String(rawPoints).split('\n').filter(p => p.trim());
+          }
+        } catch (e) { parsedPoints = [rawPoints]; }
 
-    // ✨【核心修正區】：確保顯示的題數與內容一致
-    let rawCount = s.totalQuestions || s.TotalQuestions || s['totalQuestions'];
-    let finalCount = 10; // 預設底線
+        let rawCount = s.totalQuestions || s.TotalQuestions || s['totalQuestions'];
+        let finalCount = 10; 
 
-    // 1. 先嘗試解析題目內容，獲取真實題目數量
-    let actualQuizLength = 0;
-    try {
-      const qData = s.QuizJSON || s.QuizContent;
-      if (qData) {
-        const parsedQuiz = typeof qData === 'string' ? JSON.parse(qData) : qData;
-        if (Array.isArray(parsedQuiz)) {
-          actualQuizLength = parsedQuiz.length;
+        let actualQuizLength = 0;
+        try {
+          const qData = s.QuizJSON || s.QuizContent;
+          if (qData) {
+            const parsedQuiz = typeof qData === 'string' ? JSON.parse(qData) : qData;
+            if (Array.isArray(parsedQuiz)) {
+              actualQuizLength = parsedQuiz.length;
+            }
+          }
+        } catch (e) { actualQuizLength = 0; }
+
+        if (rawCount !== undefined && rawCount !== "" && rawCount !== null) {
+          finalCount = parseInt(rawCount);
+        } else if (actualQuizLength > 0) {
+          finalCount = actualQuizLength;
         }
-      }
-    } catch (e) {
-      actualQuizLength = 0;
-    }
 
-    // 2. 判斷優先權：Google Sheet 欄位有數字用欄位，否則用實際題數，最後才用 10
-    if (rawCount !== undefined && rawCount !== "" && rawCount !== null) {
-      finalCount = parseInt(rawCount);
-    } else if (actualQuizLength > 0) {
-      finalCount = actualQuizLength;
+        return {
+          sessionId: s.sessionId || s.SessionID || '',
+          date: s.Date || '',
+          topic: s.Topic || '',
+          category: s.Category || s.category || '',
+          quizTitle: s.QuizTitle || '隨堂小挑戰',
+          quizMode: s.QuizMode || '',
+          points: parsedPoints, 
+          QuizJSON: s.QuizJSON || s.QuizContent || '',
+          totalQuestions: finalCount,
+          userName: s.UserName || '',
+          studentId: String(student_id_val).toLowerCase().trim()
+        };
+      }).reverse();
     }
-
-    return {
-      sessionId: s.sessionId || s.SessionID || '',
-      date: s.Date || '',
-      topic: s.Topic || '',
-      category: s.Category || s.category || '',
-      quizTitle: s.QuizTitle || '隨堂小挑戰',
-      quizMode: s.QuizMode || '',
-      points: parsedPoints, 
-      QuizJSON: s.QuizJSON || s.QuizContent || '',
-      // 💡 這裡將使用我們計算出的 finalCount
-      totalQuestions: finalCount,
-      userName: s.UserName || '',
-      studentId: String(student_id_val).toLowerCase().trim()
-    };
-  }).reverse();
-}
   } catch (e) {
     console.error("[Fetch] 載入失敗:", e);
   } finally {
     loading.value = false;
   }
 
-  updateFilteredData();
+  // 確保此函式存在才呼叫
+  if (typeof updateFilteredData === 'function') {
+    updateFilteredData();
+  }
 };
 
 // --- 功能：開啟測驗 ---
