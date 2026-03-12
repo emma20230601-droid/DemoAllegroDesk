@@ -53,58 +53,18 @@
               class="w-full bg-[#F8FBFF] border-2 border-transparent p-6 rounded-[32px] text-base outline-none focus:bg-white focus:border-blue-100 transition-all placeholder:text-gray-300 shadow-sm" />
           </div>
 
-          <div class="h-px bg-blue-50/50"></div>
-          <!--
-<div class="space-y-8 mt-16 pt-16 border-t border-slate-50">
-  <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-6 ml-4">
-    <div class="space-y-1">
-      <h3 class="text-sm font-black text-slate-800 uppercase tracking-[0.3em] flex items-center gap-3">
-        <span class="w-2 h-2 rounded-full bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]"></span>
-        AI Core Logic
-      </h3>
-      <p class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">調整各模組的思考邏輯與輸出指令</p>
-    </div>
-
-    <div class="flex p-1 bg-slate-100/50 rounded-2xl border border-slate-200/50">
-      <button v-for="(label, key) in promptLabels" :key="key" 
-        @click="activePromptTab = key"
-        :class="[
-          'px-5 py-2 rounded-xl text-[10px] font-black transition-all duration-500 tracking-widest',
-          activePromptTab === key 
-            ? 'bg-white text-blue-600 shadow-[0_4px_12px_rgba(0,0,0,0.05)] ring-1 ring-black/5' 
-            : 'text-slate-400 hover:text-slate-600'
-        ]"
-      >
-        {{ label.short }}
-      </button>
-    </div>
-  </div>
-
-  <div class="relative group px-2">
-    <div class="flex items-center gap-3 mb-4 ml-4">
-      <span class="text-[10px] font-black text-blue-500/60 uppercase tracking-widest">Mode:</span>
-      <span class="text-[11px] font-black text-slate-600 uppercase tracking-widest bg-slate-100 px-3 py-1 rounded-full">
-        {{ promptLabels[activePromptTab]?.full }}
-      </span> 
-      <span class="text-[11px] text-rose-600 bg-rose-50 border border-rose-100 px-3 py-1 rounded-full">
-  注意：只能修改中文或數字，其餘程式結構請勿修改！
-</span>
-    </div>
-    
-    <div class="relative">
-      <textarea 
-        v-model="config[activePromptTab]" 
-        :placeholder="'請輸入 ' + promptLabels[activePromptTab]?.full + ' 的核心指令...'" 
-        class="w-full bg-[#FBFDFF] border border-slate-100 p-10 rounded-[48px] text-[13px] leading-relaxed text-slate-600 outline-none focus:bg-white focus:border-blue-200 focus:ring-4 focus:ring-blue-50/30 transition-all placeholder:text-slate-200 shadow-sm min-h-[450px] resize-none font-mono"
-      ></textarea>
-      
-      <div class="absolute bottom-8 right-10 flex items-center gap-2 opacity-30 group-hover:opacity-100 transition-opacity duration-700">
-        <span class="text-[9px] font-black text-slate-400 uppercase tracking-[0.3em]">Neural Protocol v1.0</span>
-      </div>
-    </div>
-  </div>
-</div>
--->
+          <div class="space-y-4">
+            <div class="flex items-center gap-3 ml-2">
+              <span class="w-8 h-8 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center text-[10px] font-black">03</span>
+              <span class="text-xs font-black text-blue-600 uppercase tracking-widest text-[10px]">Cloud Sync (GAS API)</span>
+            </div>
+            <input 
+              v-model="config.user_gas_url" 
+              type="text"
+              placeholder="https://script.google.com/macros/s/.../exec" 
+              class="w-full bg-[#F8FBFF] border-2 border-transparent p-6 rounded-[32px] text-base outline-none focus:bg-white focus:border-blue-100 transition-all placeholder:text-gray-300 shadow-sm" 
+            />
+          </div>
           <div class="space-y-6">
             <div class="flex items-center gap-3 ml-2">
               <span class="w-8 h-8 rounded-full bg-gray-50 text-gray-400 flex items-center justify-center text-[10px] font-black">03</span>
@@ -177,131 +137,95 @@ const updateGlobalConfig = inject('updateGlobalConfig');
 
 const isSaving = ref(false); // 🚩 新增儲存中狀態
 
-// 1. 定義編輯狀態與標籤
-const activePromptTab = ref('prompt_analyze_clinic_post'); 
-const promptLabels = {
-  prompt_analyze_clinic_post: { short: '診斷', full: 'AI 診療中心診斷', target: '診療中心' },
-  prompt_assignments_post: { short: '掃描', full: '學習戰情室考卷掃描分析', target: '戰情室' },
-  prompt_sessions_post: { short: '出題', full: '學習日誌 AI 智能出題', target: '日誌' },
-  prompt_vision_sessions_post: { short: '視覺', full: '學習日誌筆記影像分析', target: '日誌' }
-};
 
-// 2. 初始化 config
+// 2. 初始化 config (✨ 已加入 user_gas_url)
 const config = reactive({
   student_id: '', 
   gemini_key: '',
   sheet_id: '',
+  user_gas_url: '', // 🚀 新增：GAS 同步連結
   cloudinary_name: '',
   cloudinary_api_key: '',
-  cloudinary_api_secret: '',
-  prompt_analyze_clinic_post: '',
-  prompt_assignments_post: '',
-  prompt_sessions_post: '',
-  prompt_vision_sessions_post: ''
+  cloudinary_api_secret: ''
 });
 
-// 3. 載入邏輯：參考妳提供的 query 傳參方式
-
-
-onMounted(async () => {
-  // 1. 先從 allegro_config 讀取基礎設定 (API Keys 等)
+// 3. 載入邏輯
+onMounted(() => {
+  // 1. 從 allegro_config 讀取基礎設定 (Keys, IDs, GAS URL 等)
   const savedConfig = localStorage.getItem('allegro_config');
   if (savedConfig) {
     try {
-      Object.assign(config, JSON.parse(savedConfig));
+      const parsed = JSON.parse(savedConfig);
+      // 自動將儲存的內容填入 config 反應式物件
+      Object.assign(config, parsed);
+      
+      // 確保 user_gas_url 同步到獨立 Key，方便 media.vue 直接讀取
+      if (config.user_gas_url) {
+        localStorage.setItem('user_gas_url', config.user_gas_url);
+      }
+      console.log('✅ 本地設定載入成功');
     } catch (e) {
-      console.error('解析 allegro_config 失敗', e);
+      console.error('❌ 解析 allegro_config 失敗', e);
     }
   }
 
-  // 2. 🚩 關鍵：從 allegro_auth_session 抓取 student_id
+  // 2. 🚩 取得 Student ID (用於識別身分，但不發送 API)
   const authSession = localStorage.getItem('allegro_auth_session');
   if (authSession) {
     try {
       const authData = JSON.parse(authSession);
-      // 假設結構是 { student_id: '...' } 或 { login_code: '...' }
       config.student_id = authData.student_id || authData.login_code || '';
-      console.log('📍 從 Auth Session 取得 Student ID:', config.student_id);
     } catch (e) {
-      console.error('解析 allegro_auth_session 失敗', e);
+      console.error('解析 auth session 失敗', e);
     }
   }
 
-  // 3. 如果還是沒有 ID，嘗試從 inject 的全域變數拿
+  // 3. 備援：如果上面沒抓到，嘗試從全域注入拿
   if (!config.student_id && userConfig?.student_id) {
     config.student_id = userConfig.student_id;
   }
-
-  // 4. 執行雲端抓取 (確保有 ID 才發送)
-  if (config.student_id) {
-    console.log('🚀 開始同步雲端指令集...');
-    try {
-      const res = await $fetch('/api/config-sync', {
-        method: 'GET',
-        query: { studentId: config.student_id }
-      });
-      
-      console.log('📡 API 回傳結果:', res);
-
-      if (res.success && res.data) {
-        // 更新 Prompt 指令
-        Object.keys(promptLabels).forEach(key => {
-          if (res.data[key]) config[key] = res.data[key];
-        });
-        console.log('✅ 指令集載入成功');
-      }
-    } catch (err) {
-      console.error('🔥 API 請求異常:', err);
-    }
-  } else {
-    console.warn('⚠️ 找不到 Student ID，請檢查登入狀態');
-  }
+  
+  console.log('📍 目前學生 ID:', config.student_id);
 });
 
-// 4. 儲存邏輯：同樣使用 query 物件
+// 4. 儲存邏輯
 const saveSettings = async () => {
-
-  if (isSaving.value) return; // 防止重複觸發
+  if (isSaving.value) return; 
   
-  isSaving.value = true; // 🚀 開始轉圈
+  isSaving.value = true; 
   isSaved.value = false;
 
+  // 1. 同步 Sheet Name
   if (config.sheet_id) {
     config.sheet_name = config.sheet_id; 
   }
 
-  // 存到本地
+  // 2. ✨ 核心儲存邏輯
+  // 儲存完整 config 物件到本地
   localStorage.setItem('allegro_config', JSON.stringify(config));
+  
+  // 獨立存入 user_gas_url，確保 media.vue 讀取方便
+  if (config.user_gas_url) {
+    localStorage.setItem('user_gas_url', config.user_gas_url.trim());
+  }
 
-  // 🚩 同步到 Google Sheet
   try {
-    const res = await $fetch('/api/config-sync', {
-      method: 'POST',
-      query: { studentId: config.student_id }, // 👈 指定是哪個學生的 Sheet
-      body: {
-        configData: {
-          prompt_analyze_clinic_post: config.prompt_analyze_clinic_post,
-          prompt_assignments_post: config.prompt_assignments_post,
-          prompt_sessions_post: config.prompt_sessions_post,
-          prompt_vision_sessions_post: config.prompt_vision_sessions_post
-        }
-      }
-    });
-
-    // 模擬一個小延遲讓轉圈有感（且確保資料寫入穩定）
-    await new Promise(resolve => setTimeout(resolve, 800));
+    // 💡 因為你拿掉了 prompt 同步，這裡不再需要呼叫 /api/config-sync 的 POST 請求
+    // 如果你未來完全不打算同步到資料庫，可以直接把 try-catch 區塊刪除
     
-    if (res.success) {
-      console.log('✅ 雲端指令儲存成功');
-    }
+    // 模擬一個小延遲讓使用者感覺「有在儲存」
+    await new Promise(resolve => setTimeout(resolve, 600));
+    
+    console.log('✅ 設定已儲存至本地瀏覽器');
+
   } catch (err) {
-    console.error('❌ 雲端同步失敗:', err.message);
-  }finally {
-    // 🏁 結束轉圈
+    console.error('❌ 儲存過程發生錯誤:', err.message);
+  } finally {
+    // 3. 🏁 結束狀態與 UI 反饋
     isSaving.value = false;
     
-    // UI 反饋
     if (updateGlobalConfig) updateGlobalConfig();
+    
     isSaved.value = true;
     showToast.value = true;
     
