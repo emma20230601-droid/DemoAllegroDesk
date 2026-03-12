@@ -1039,21 +1039,21 @@ if (response.success) {
       const gasUrl = localStorage.getItem('user_gas_url'); 
       if (!gasUrl) throw new Error("找不到 GAS 連結，請先前往設定頁面配置");
 
-      const payload = {
-        action: 'append_session',
-        sheetName: 'Sessions', // 存到學習日誌總表
-        data: {
-          sessionId: newSid,
-          studentId: auth.student_id,
-          date: new Date().toLocaleDateString('en-CA'),
-          topic: newSession.value.topic,
-          category: newSession.value.category,
-          points: JSON.stringify(pointsArray),
-          quizJSON: JSON.stringify(response.quizGenerated), // 存入剛出好的題
-          quizMode: newSession.value.quizMode,
-          totalQuestions: newSession.value.quizCount
-        }
-      };
+    const payload = {
+      action: 'append_session',
+      sheetName: 'Sessions',
+      data: {
+        sessionId: newSid,
+        date: new Date().toLocaleDateString('en-CA'),
+        topic: newSession.value.topic,
+        category: newSession.value.category,
+        points: JSON.stringify(pointsArray), // E 欄
+        quizTitle: '隨堂挑戰',                // F 欄
+        quizMode: newSession.value.quizMode, // G 欄
+        quizJSON: JSON.stringify(response.quizGenerated), // H 欄
+        studentId: auth.student_id           // I 欄
+      }
+    };
 
       // 使用 no-cors 模式發送給 Google
       await fetch(gasUrl, {
@@ -1216,11 +1216,11 @@ const saveQuizResult = async (snapshot) => {
       mode: 'no-cors',
       body: JSON.stringify({
         action: 'append_batch',
-        sheetName: auth.student_id, // 存到該學生的個人分頁
+        sheetName: auth.name, // 存到該學生的個人分頁
         data: updates
       })
     });
-   console.log("✅ 測驗結果已透過 GAS 同步");
+   console.log("✅ 測驗結果已透過 GAS 同步=", auth.name);
   } catch (e) {
     console.error("同步失敗:", e);
   }
