@@ -133,7 +133,7 @@ export default defineEventHandler(async (event) => {
     }
 
     // --- 📝 情況二：generateQuizOnly (取代原本 publishSession/refreshQuiz 中的 AI 部分) ---
-    if (action === 'generateQuizOnly') {
+    if (action === 'generateQuizOnly' || action === 'refreshQuiz') {
       const finalQuizContent = await generateAIQuiz(
         sessionData.points, 
         sessionData.category || '全科', 
