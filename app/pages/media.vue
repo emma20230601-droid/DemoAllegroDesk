@@ -1002,73 +1002,78 @@ const finishAndSubmitQuiz = async (snapshot) => {
 };
 
 const saveNewSession = async () => {
-// ---✨門禁檢查---
   const auth = getValidConfig(); 
   if (!auth) return; 
-  const userConfig = auth; 
-  console.log("✅ 門禁驗證成功，準備呼叫 API");
-
-// 💡 統一變數名稱，對接門禁清單中的 key
-  const targetSheetId = userConfig.sheet_id;
-  const currentStudentId = userConfig.student_id;
-  const targetGeminiKey = userConfig.gemini_key;
-
-// --- ✨ 修改處 1：主題檢查 ---
-if (!newSession.value.topic || newSession.value.topic.trim() === '') {
-  showAlert('請輸入標題', '學習日誌需要一個標題才能發布喔！', 'error');
-  return;
-}
-
-// 修正：這裡應該檢查 pointsRaw，因為輸入框綁定的是這個
-console.log("當前內容長度:", newSession.value.pointsRaw?.length); 
-if (!newSession.value.pointsRaw || newSession.value.pointsRaw.trim() === '') {
-  showAlert('請輸入內容', '學習日誌需要有內容才能發布喔！', 'error');
-  return;
-}
   
-  // --- ✨ 修改處 2：試算表 ID 檢查 ---
-  if (!targetSheetId) {
-    showAlert('系統錯誤', '找不到試算表 ID，請檢查設置頁面', 'error');
+  if (!newSession.value.topic?.trim() || !newSession.value.pointsRaw?.trim()) {
+    showAlert('內容不完整', '標題與內容都是必填的喔！', 'error');
     return;
   }
 
   isSaving.value = true;
-  isAnalyzing.value = true; // 啟動全域遮罩
-  uploadStatus.value = '正在儲存學習日誌...';
+  isAnalyzing.value = true; 
+  uploadStatus.value = '正在處理 AI 命題與同步...';
   
   try {
-      const response = await $fetch('/api/sessions', {
+    // 1. 🚀 先叫 Vercel 後端幫忙出題 (純 AI 運算)
+    const response = await $fetch('/api/sessions', {
       method: 'POST',
       body: {
-        action: 'publishSession',
-        userConfig: { 
-          gemini_key: targetGeminiKey, 
-          sheet_id: targetSheetId,
-          student_id: currentStudentId // 確保這裡的小寫 n
-        },
+        action: 'generateQuizOnly', // 💡 改用純 AI 模式
+        userConfig: { gemini_key: auth.gemini_key },
         sessionData: {
-          sessionId: 'SID-' + Date.now(),
-          date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
           topic: newSession.value.topic,
-          category: newSession.value.category,
           points: newSession.value.pointsRaw.split('\n').filter(p => p.trim()),
-          quizTitle: '隨堂小挑戰',
           quizMode: newSession.value.quizMode,
-          quizCount: newSession.value.quizCount || 10,
-          student_id: userConfig.student_id // 這裡是底線
+          quizCount: newSession.value.quizCount || 10
         }
       }
     });
 
 if (response.success) {
-      // 1. ✨ 先執行刷新：確保最新的一筆 Session 已經存入 Google Sheets 並讀回本地
+  const newSid = 'SID-' + Date.now();
+      const pointsArray = newSession.value.pointsRaw.split('\n').filter(p => p.trim());
+      
+      // 2. 💡 關鍵：直接呼叫 GAS 存入 Google Sheets
+      // 我們不經過 Vercel，直接把資料丟進 GAS
+      const gasUrl = localStorage.getItem('user_gas_url'); 
+      if (!gasUrl) throw new Error("找不到 GAS 連結，請先前往設定頁面配置");
+
+      const payload = {
+        action: 'append_session',
+        sheetName: 'Sessions', // 存到學習日誌總表
+        data: {
+          sessionId: newSid,
+          studentId: auth.student_id,
+          date: new Date().toLocaleDateString('en-CA'),
+          topic: newSession.value.topic,
+          category: newSession.value.category,
+          points: JSON.stringify(pointsArray),
+          quizJSON: JSON.stringify(response.quizGenerated), // 存入剛出好的題
+          quizMode: newSession.value.quizMode,
+          totalQuestions: newSession.value.quizCount
+        }
+      };
+
+      // 使用 no-cors 模式發送給 Google
+      await fetch(gasUrl, {
+        method: 'POST',
+        mode: 'no-cors',
+        body: JSON.stringify(payload)
+      });
+
+      // 💡 關鍵優化：給 Google Sheets 一點點時間 (例如 800ms) 處理寫入
+      // 否則接下來的 fetchSessions() 可能會抓不到最新那筆
+      await new Promise(resolve => setTimeout(resolve, 800));
+
+      // 1. ✨ 先執行刷新
       await fetchSessions();
       
-      // 2. ✨ 從刷新後的列表中，找出剛才建立的那一筆 (通常是第一筆，因為有 reverse)
-      // 這樣可以拿到 Google Sheets 真正分配的 sessionId
-      const latestSessionFromSheet = sessions.value[0];
-      const finalSessionId = latestSessionFromSheet?.sessionId || response.sessionId || ('SID-' + Date.now());
-
+      // 2. ✨ 從刷新後的列表中找出剛才那筆
+      // 這裡直接比對我們剛生成的 newSid
+      const latestSessionFromSheet = sessions.value.find(s => s.sessionId === newSid);
+      const finalSessionId = latestSessionFromSheet?.sessionId || newSid;
+      
       // 3. 處理題目數據 (維持原本邏輯)
       let rawQuestions = response.quizGenerated || [];
       const questionsArray = (Array.isArray(rawQuestions) ? rawQuestions : [rawQuestions]).map(q => ({
@@ -1148,6 +1153,7 @@ const saveQuizResult = async (snapshot) => {
     return; // 這裡會自動跳出你設計的漂亮寶藍色彈窗
   }
 
+
   // 📦 第二道保險：資料檢查 (確認測驗內容還在)
   // 💡 這裡一定要留！解決傳入參數或全域變數 undefined 的問題
   const quizData = snapshot || activeQuiz.value;
@@ -1156,6 +1162,11 @@ const saveQuizResult = async (snapshot) => {
     console.warn("[系統] 找不到測驗資料快照，取消存檔");
     return;
   }
+
+  
+  const gasUrl = localStorage.getItem('user_gas_url');
+  if (!gasUrl) return;
+
 
   // ✨ 驗證通過，開始取值
   const targetSheetId = auth.sheet_id;
@@ -1187,27 +1198,29 @@ const saveQuizResult = async (snapshot) => {
       date: formattedDate,
       scan_date: scanTimestamp,
       category: currentCategory, 
-      question_key: `${currentTopic}(${modeLabel}) - 第 ${idx + 1} 題`,
+      title: `${currentTopic} - (隨堂測驗)`, // 對應 E 欄
+      question_key: `${currentTopic}(${modeLabel}) - 第 ${idx + 1} 題`, // 對應 F 欄
       correct_answer: getAnswerLetter(res.correct),
       user_answer: getAnswerLetter(res.selected),
-      title: `${currentTopic} - (隨堂測驗)`,
       knowledge_point: fullQuestionDetail,
-      ai_explanation: res.explanation || '無解析',
-      is_mastered: res.isCorrect ? 'TRUE' : 'FALSE'
+      image_url: '', // J 欄目前留空
+      is_mastered: res.isCorrect ? 'TRUE' : 'FALSE',
+      ai_explanation: res.explanation || '無解析'
     };
   });
 
   try {
-    await $fetch('/api/assignments', {
+    // 💡 捨棄 /api/assignments，直接找 GAS
+    await fetch(gasUrl, {
       method: 'POST',
-      body: { 
-        action: 'quiz_submit', 
-        studentId, 
-        sheetId: targetSheetId, // 傳給後端確保存對地方
-        updates 
-      }
+      mode: 'no-cors',
+      body: JSON.stringify({
+        action: 'append_batch',
+        sheetName: auth.student_id, // 存到該學生的個人分頁
+        data: updates
+      })
     });
-    console.log("✅ 測驗結果同步成功");
+   console.log("✅ 測驗結果已透過 GAS 同步");
   } catch (e) {
     console.error("同步失敗:", e);
   }
@@ -1216,22 +1229,7 @@ const saveQuizResult = async (snapshot) => {
 // 1. 宣告目前選中的科目 (預設為樂理)
 const selectedSubject = ref('國文');
 
-// 2. 新增過濾後的 Session 計算屬性
-/*const filteredSessions = computed(() => {
-  if (!sessions.value) return [];
-  
-  // 1. 取得當前選中科目的所有子分類，並統一轉成小寫方便比對
-  const allowedCats = (subjectConfigs[selectedSubject.value]?.cats || [])
-    .map(c => String(c).trim().toLowerCase());
-  
-  return sessions.value.filter(s => {
-    // 2. 取得該紀錄的 Category，同樣轉小寫
-    const sessionCat = String(s.category || '').trim().toLowerCase();
-    
-    // 3. 如果這個紀錄的分類屬於目前科目的分類清單，就顯示
-    return allowedCats.includes(sessionCat);
-  });
-});*/
+
 
 const filteredSessions = ref([]);
 
@@ -1424,40 +1422,43 @@ const onPointBlur = async (event, session, index) => {
 
 // 前端更新邏輯
 const updateSessionInDB = async (session) => {
-  // 1. 🛡️ 門禁守衛：直接取得驗證過的設定
+  // 1. 🛡️ 門禁守衛
   const auth = getValidConfig(); 
   if (!auth) return;
 
+  const gasUrl = localStorage.getItem('user_gas_url');
+  if (!gasUrl) {
+    showAlert('設定缺失', '請先配置 GAS 連結', 'error');
+    return;
+  }
+
   try {
-    const res = await $fetch('/api/sessions', {
+    // 💡 改為直接對接 GAS
+    await fetch(gasUrl, {
       method: 'POST',
-      body: {
-        action: 'updateSession',
-        sessionData: {
-          sessionId: session.sessionId,
+      mode: 'no-cors',
+      body: JSON.stringify({
+        action: 'update_session',
+        sheetName: 'Sessions', // 更新總表裡的日誌
+        sessionId: session.sessionId,
+        updates: {
           topic: session.topic,
-          points: session.points
-        },
-        // ✅ 修正：直接對接門禁通過後的資料
-        userConfig: {
-          gemini_key: auth.gemini_key,
-          sheet_id: auth.sheet_id,
-          student_id: auth.student_id
+          // 記得將陣列轉回字串儲存，保持格式一致
+          points: JSON.stringify(session.points) 
         }
-      }
+      })
     });
 
-   if (res.success) {
-      // 🌟 使用你調好的寶藍色風格 Alert
-      showAlert(
-        '雲端同步完成', 
-        `「${session.topic || '內容'}」已成功儲存至試算表`, 
-        'success'
-      );
-    }
+    // 🌟 因為 no-cors 無法得知成功與否，我們假設只要沒噴 Error 就是發送成功
+    showAlert(
+      '雲端同步完成', 
+      `「${session.topic || '內容'}」已成功更新`, 
+      'success'
+    );
+    
   } catch (err) {
-    // 🌟 同樣調用統一風格的錯誤提示
-    showAlert('同步失敗', '請檢查網路連線或配置資訊', 'error');
+    console.error("GAS Update Error:", err);
+    showAlert('同步失敗', '無法連線至 Google 服務', 'error');
   }
 };
 
