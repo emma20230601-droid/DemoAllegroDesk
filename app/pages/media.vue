@@ -781,22 +781,30 @@ const openQuiz = async (session, isRefresh = false) => {
           }
         });
 
-        if (response.success && response.quizGenerated) {
-          // ✨ 更新狀態與顯示
-          if (session.newDiff) session.quizMode = session.newDiff;
-          if (session.newCount) session.totalQuestions = session.newCount;
-          session.newDiff = null; 
-          session.newCount = null;
-          
-          // ✨ 重要：將後端的新題目存回 session
-          session.QuizJSON = typeof response.quizGenerated === 'string' 
-            ? response.quizGenerated 
-            : JSON.stringify(response.quizGenerated);
+       if (response.success && response.quizGenerated) {
+      const newQuizJSON = typeof response.quizGenerated === 'string' 
+        ? response.quizGenerated 
+        : JSON.stringify(response.quizGenerated);
 
-          if (showToast) showToast("✨ 新題目已儲存並載入！");
-          
-          // 💡 修正點：這裡「不」使用 return，讓程式往下走解析邏輯
-        } else {
+      // 2. ✨ 重點：出完題立刻叫 GAS 存回試算表
+      const gasUrl = localStorage.getItem('user_gas_url');
+      if (gasUrl) {
+        await fetch(gasUrl, {
+          method: 'POST',
+          mode: 'no-cors',
+          body: JSON.stringify({
+            action: 'update_session', // 我們剛剛寫好的更新功能
+            sessionId: session.sessionId,
+            updates: {
+              quizJSON: newQuizJSON, // 假設你在 GAS 有對應這個欄位
+              quizMode: session.newDiff || session.quizMode
+            }
+          })
+        });
+      }
+
+      session.QuizJSON = newQuizJSON;
+      } else {
           throw new Error("AI 未能回傳有效題目");
         }
       } catch (e) {
@@ -930,73 +938,59 @@ const handleAnswer = async (selected) => {
 // 傳入 snapshot 作為參數
 const finishAndSubmitQuiz = async (snapshot) => {
   const quizData = snapshot || activeQuiz.value;
-  
-  if (!quizData) {
-    console.warn("[系統] finishAndSubmitQuiz 找不到測驗資料，取消上傳");
-    return;
-  }
+  if (!quizData) return;
+
+  const gasUrl = localStorage.getItem('user_gas_url');
+  if (!gasUrl) return;
 
   const correctCount = quizResults.value.filter(r => r.isCorrect).length;
-  // 💡 這裡建議使用 quizData.questions.length 確保總題數正確
-  const quizTotal = quizData.questions?.length || totalQuestions.value || 1;
+  const quizTotal = quizData.questions?.length || 1;
   const finalScore = Math.round((correctCount / quizTotal) * 100);
   const isAllCorrect = finalScore === 100;
   
-  const currentTopic = quizData.topic;
-  const currentSid = quizData.sessionId; 
-  
-  if (showToast) showToast('測驗結束，上傳結果中...');
+  if (showToast) showToast('測驗結束，正在同步成績...');
 
   try {
-    // 1. 執行上傳
-    await $fetch('/api/quiz-submit', {
+    // 💡 改為呼叫 GAS，欄位完全對齊你原本的 .js 檔案
+    await fetch(gasUrl, {
       method: 'POST',
-      body: {
-        sessionId: currentSid,
+      mode: 'no-cors',
+      body: JSON.stringify({
+        action: 'submit_quiz',
+        sessionId: quizData.sessionId,
         studentId: userConfig.student_id,
         studentName: userConfig.userName || 'Unknown',
-        sheetId: userConfig.sheet_id,
-        topic: currentTopic,
+        topic: quizData.topic,
         score: finalScore,
-        isCorrect: isAllCorrect,
-        // ✨ 新增：傳入一個唯一 ID (時間戳)，後端可以用來防止重複寫入
-        quizId: `Q-${Date.now()}` 
-      }
+        isCorrect: isAllCorrect
+      })
     });
     
-    // 2. ✨ 關鍵：立即呼叫重新獲取資料，這樣次數才會從 1 變 2，不需要 F5
+    // 2. 刷新資料 (讓首頁次數更新)
     if (typeof fetchSessions === 'function') {
       await fetchSessions();
     }
 
-    // 3. 更新本地狀態 (這部分維持你的邏輯)
-    completedTopics.value.add(currentSid);
+    // 3. 更新本地狀態 (維持原本邏輯)
+    completedTopics.value.add(quizData.sessionId);
     completedTopics.value = new Set(completedTopics.value); 
+    quizScores.value = { ...quizScores.value, [quizData.sessionId]: finalScore };
 
-    quizScores.value = {
-      ...quizScores.value,
-      [currentSid]: finalScore
-    };
-    
-    // --- localStorage 邏輯 ---
+    // --- localStorage 儲存 ---
     const localKey = `completed_${userConfig.student_id}`;
     const localScoreKey = `scores_${userConfig.student_id}`;
-    
     const savedSids = JSON.parse(localStorage.getItem(localKey) || '[]');
-    if (!savedSids.includes(currentSid)) {
-      savedSids.push(currentSid);
+    if (!savedSids.includes(quizData.sessionId)) {
+      savedSids.push(quizData.sessionId);
       localStorage.setItem(localKey, JSON.stringify(savedSids));
     }
-
     const savedScores = JSON.parse(localStorage.getItem(localScoreKey) || '{}');
-    savedScores[currentSid] = finalScore;
+    savedScores[quizData.sessionId] = finalScore;
     localStorage.setItem(localScoreKey, JSON.stringify(savedScores));
     
     if (showToast) showToast(`🎉 挑戰完成！最終得分：${finalScore}`);
   } catch (e) {
-    console.error("上傳失敗", e);
-    // 失敗時也嘗試刷新一次，確保資料同步
-    if (typeof fetchSessions === 'function') await fetchSessions();
+    console.error("成績同步失敗", e);
     if (showToast) showToast('成績上傳失敗，請檢查網路。');
   }
 };
@@ -1321,45 +1315,44 @@ const numberToChinese = (num) => {
 
 // --- 1. 核心刪除邏輯 ---
 const startDeleteLogic = async (session) => {
-// 1. 🛡️ 門禁守衛：身分檢查
   const auth = getValidConfig(); 
-  if (!auth) return; // 沒設定好就跳彈窗引導
+  if (!auth) return;
 
-  // 3. 執行刪除
+  const gasUrl = localStorage.getItem('user_gas_url');
+  if (!gasUrl) {
+    showAlert('錯誤', '找不到 GAS 設定，無法執行刪除', 'error');
+    return;
+  }
+
   loading.value = true;
   isDeleting.value = true;
   uploadStatus.value = '正在移除紀錄...';
 
   try {
-    const res = await $fetch('/api/sessions', {
+    // 💡 改為直接連向 GAS
+    const response = await fetch(gasUrl, {
       method: 'POST',
-      body: {
-        action: 'deleteSession',
-        sessionData: {
-          sessionId: session.sessionId,
-          topic: session.topic,
-          date: session.date
-        },
-        // ✅ 修正：直接使用 auth 的資料，保證精準
-        userConfig: {
-          gemini_key: auth.gemini_key,
-          sheet_id: auth.sheet_id,
-          student_id: auth.student_id
-        }
-      }
+      mode: 'no-cors', // 保持一致
+      body: JSON.stringify({
+        action: 'delete_session',
+        sessionId: session.sessionId,
+        sheetName: 'Sessions' // 告訴 GAS 要去哪張表刪除
+      })
     });
 
-   if (res.success) {
-      const idx = sessions.value.findIndex(s => s.sessionId === session.sessionId);
-      if (idx !== -1) {
-        sessions.value.splice(idx, 1);
-        updateFilteredData(); 
-      }
-      showToast?.('紀錄已成功刪除');
+    // 💡 註：因為 no-cors 無法取得 response.json()，
+    // 我們假設請求發出即成功，或者你可以把 mode 改回 cors (如果 GAS 有設定的話)
+    // 這裡我們優化體驗，直接在前端移除
+    const idx = sessions.value.findIndex(s => s.sessionId === session.sessionId);
+    if (idx !== -1) {
+      sessions.value.splice(idx, 1);
+      updateFilteredData(); 
     }
+    showToast?.('紀錄已從雲端移除');
+
   } catch (err) {
-    // 💡 錯誤處理也使用你統一的風格
-    showAlert('刪除失敗', err.data?.message || '目前無法連線至伺服器', 'error');
+    console.error("刪除失敗:", err);
+    showAlert('刪除失敗', '目前無法連線至 GAS 伺服器', 'error');
   } finally {
     loading.value = false;
     isDeleting.value = false;
@@ -1431,23 +1424,28 @@ const updateSessionInDB = async (session) => {
     showAlert('設定缺失', '請先配置 GAS 連結', 'error');
     return;
   }
+  // 🛡️ 防呆：確保 points 是字串
+  const pointsValue = Array.isArray(session.points) 
+    ? JSON.stringify(session.points) 
+    : session.points;
 
   try {
     // 💡 改為直接對接 GAS
-    await fetch(gasUrl, {
+   await fetch(gasUrl, {
       method: 'POST',
-      mode: 'no-cors',
+      mode: 'no-cors', 
       body: JSON.stringify({
         action: 'update_session',
-        sheetName: 'Sessions', // 更新總表裡的日誌
         sessionId: session.sessionId,
         updates: {
           topic: session.topic,
-          // 記得將陣列轉回字串儲存，保持格式一致
-          points: JSON.stringify(session.points) 
+          points: pointsValue
         }
       })
     });
+
+    // 這裡印一下 Log，確認前端有發出這筆資料
+    console.log("已發送更新請求:", session.sessionId, session.topic);
 
     // 🌟 因為 no-cors 無法得知成功與否，我們假設只要沒噴 Error 就是發送成功
     showAlert(
