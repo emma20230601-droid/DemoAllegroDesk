@@ -1,10 +1,6 @@
 import { readBody, createError, getQuery } from 'h3';
 import { v2 as cloudinary } from 'cloudinary';
-import { GoogleSpreadsheet } from 'google-spreadsheet';
-import { JWT } from 'google-auth-library';
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import fs from 'fs';
-import path from 'path';
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -21,156 +17,38 @@ export default defineEventHandler(async (event) => {
   try {
     const body = await readBody(event);
     const query = getQuery(event);
-    const { action, updates, title, imageBatch, testDate, notes, mode, subject, sessionId, userConfig } = body;
+    const { action, imageBatch, subject, userConfig } = body;
     
-    // --- 🛡️ 1. 配置優先權解析 (門禁) ---
+    // --- 🛡️ 1. 沿用你的配置優先權解析 (門禁) ---
     const runtimeConfig = useRuntimeConfig(event);
     
     // 優先權：Body > Query > 門禁 userConfig > 環境變數
-    const studentId = body.studentId || query.studentId;
-    const incomingSheetId = body.sheetId || query.sheetId || userConfig?.sheet_id;
-    
-    // AI 門禁：前端傳入優先
     const FINAL_GEMINI_KEY = userConfig?.gemini_key || runtimeConfig.geminiApiKey;
-    const FINAL_GEMINI_MODEL = runtimeConfig.geminiModel || "gemini-2.5-flash";
+    const FINAL_GEMINI_MODEL = runtimeConfig.geminiModel || "gemini-2.0-flash"; // 建議保留為穩定版本
     const FINAL_CLOUDINARY_NAME = userConfig?.cloudinary_name || runtimeConfig.cloudinaryName;
     const FINAL_CLOUDINARY_KEY = userConfig?.cloudinary_api_key || runtimeConfig.cloudinaryApiKey;
     const FINAL_CLOUDINARY_SECRET = userConfig?.cloudinary_api_secret || runtimeConfig.cloudinaryApiSecret;
 
-    if (!studentId) {
-      throw createError({ statusCode: 400, message: '未提供 Student ID，系統無法定位個人資料表' });
-    }
-
-    // --- 📊 2. 整合 Google Sheets 憑證 (本機 + 雲端) ---
-    let credentials = {};
-    if (runtimeConfig.googleCredentials) {
-      // 雲端模式
-      credentials = typeof runtimeConfig.googleCredentials === 'string' 
-        ? JSON.parse(runtimeConfig.googleCredentials) 
-        : runtimeConfig.googleCredentials;
-    } else {
-      // 本機模式
-      const configPath = path.resolve(process.cwd(), 'credentials.json');
-      if (fs.existsSync(configPath)) {
-        credentials = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-      } else {
-        throw createError({ statusCode: 500, message: '找不到 Google 憑證設定' });
-      }
-    }
-
-    const auth = new JWT({
-      email: credentials.client_email,
-      // 🚩 修正：處理私鑰換行問題，確保在 Vercel 正常解析
-      key: credentials.private_key.replace(/\\n/g, '\n'),
-      scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-    });
-
-    // --- 第一階段：身分動態定位 ---
-    const registryTargetId = incomingSheetId || runtimeConfig.registrySheetId;
-    const docRegistry = new GoogleSpreadsheet(registryTargetId, auth);
-    await docRegistry.loadInfo();
-    const registrySheet = docRegistry.sheetsByTitle['User_Registry'];
-    
-    let finalTargetId = null; 
-    let finalTabName = null;
-
-    if (registrySheet) {
-      const registryRows = await registrySheet.getRows();
-      const cleanSearchId = String(studentId).trim().toLowerCase();
-
-      const studentEntry = registryRows.find(r => {
-        const sId = String(r.get('student_id') || r.get('studentId') || '').trim().toLowerCase();
-        const lCode = String(r.get('login_code') || '').trim().toLowerCase();
-        return (sId !== '' && sId === cleanSearchId) || (lCode !== '' && lCode === cleanSearchId);
-      });
-
-      if (studentEntry) {
-        finalTargetId = (studentEntry.get('sheet_id') || '').trim();
-        finalTabName = (studentEntry.get('sheet_name') || '').trim();
-        console.log(`[身分驗證成功] 學生: ${studentId} -> 目標試算表: ${finalTargetId}`);
-      } else {
-        throw createError({ statusCode: 404, message: `找不到學生 ${studentId} 的註冊資料` });
-      }
-    } else {
-      throw createError({ statusCode: 500, message: '找不到 User_Registry 分頁' });
-    }
-
-    // --- 第二階段：連線到該學生的「個人專屬」試算表 ---
-    const targetDoc = new GoogleSpreadsheet(finalTargetId, auth);
-    await targetDoc.loadInfo();
-
-    let sheet = targetDoc.sheetsByTitle[finalTabName] || 
-                targetDoc.sheetsByTitle[subject] || 
-                targetDoc.sheetsByIndex[0];
-
-    if (!sheet) throw createError({ statusCode: 404, message: `無法定位有效的分頁` });
-
-    // --- A. 更新模式 ---
-    if (action === 'update') {
-      const rows = await sheet.getRows();
-      for (const updateItem of updates) {
-        const row = rows.find(r => String(r.get('id')) === String(updateItem.id));
-        if (row) {
-          row.assign(updateItem);
-          await row.save();
-        }
-      }
-      return { success: true };
-    }
-
-    // --- B. 隨堂小考提交邏輯 ---
-    if (action === 'quiz_submit') {
-      if (!updates || updates.length === 0) throw createError({ statusCode: 400, message: '無資料可供寫入' });
-      await sheet.addRows(updates);
-      return { success: true, message: `已寫入紀錄至 ${sheet.title}` };
-    }
-
-    // --- D. 刪除模式 (修正點 1：確保刪除動作也對齊門禁解析後的 ID) ---
-    if (action === 'deleteAssignment') {
-      const { id, ids } = body;
-      const rows = await sheet.getRows();
-      let deletedCount = 0;
-
-      // 統一轉為陣列處理
-      const targetIds = Array.isArray(ids) ? ids : [id];
-      const validIds = targetIds.map(v => String(v).trim()).filter(v => v !== '' && v !== 'undefined');
-
-      for (const row of rows) {
-        const rowId = String(row.get('id') || '').trim();
-        // 💡 門禁檢查：除了 ID 匹配，可以增加 studentId 的校驗 (如果 Row 裡面有存的話)
-        if (rowId !== '' && validIds.includes(rowId)) {
-          await row.delete();
-          deletedCount++;
-        }
-      }
-      return { success: true, message: `已成功刪除 ${deletedCount} 筆資料` };
-    }
-
-    // --- E. 手動重新診斷模式 (修正點 2：確保 Model 變數一致) ---
-    if (action === 're_analyze') {
-      const { question_text, correct_answer, subject: sub } = body;
-      const safeQuestionText = cleanOcrText(question_text);
-      const current = subjectLibrary[sub] || subjectLibrary['樂理'];
-      const rePrompt = `你是一位專業的${current.role}...`;
-      
-      const genAI = new GoogleGenerativeAI(FINAL_GEMINI_KEY);
-      // 💡 修正：使用門禁解析後的 FINAL_GEMINI_MODEL
-      const model = genAI.getGenerativeModel({ model: FINAL_GEMINI_MODEL }); 
-      const result = await model.generateContent(rePrompt);
-      const response = await result.response;
-      return { success: true, explanation: response.text().trim() };
-    }
-
-    // --- C. AI 分析模式 (上傳圖片) ---
     if (!FINAL_GEMINI_KEY) throw createError({ statusCode: 500, message: '後端遺失 GEMINI_API_KEY' });
 
+    const genAI = new GoogleGenerativeAI(FINAL_GEMINI_KEY);
+
+    // --- E. 手動重新診斷模式 (僅邏輯計算，不寫入) ---
+    if (action === 're_analyze') {
+      const { question_text } = body;
+      const current = subjectLibrary[subject] || subjectLibrary['樂理'];
+      const model = genAI.getGenerativeModel({ model: FINAL_GEMINI_MODEL });
+      const result = await model.generateContent(`你是一位專業的${current.role}... (略) \n 題目：${question_text}`);
+      return { success: true, explanation: result.response.text().trim() };
+    }
+
+    // --- C. AI 分析模式 (上傳圖片 + 辨識) ---
     cloudinary.config({
       cloud_name: FINAL_CLOUDINARY_NAME,
       api_key: FINAL_CLOUDINARY_KEY,
       api_secret: FINAL_CLOUDINARY_SECRET
     });
 
-    const genAI = new GoogleGenerativeAI(FINAL_GEMINI_KEY);
     const model = genAI.getGenerativeModel({ 
       model: FINAL_GEMINI_MODEL, 
       generationConfig: { responseMimeType: "application/json" } 
@@ -180,46 +58,21 @@ export default defineEventHandler(async (event) => {
     const seenNumbers = [];
 
     for (let i = 0; i < imageBatch.length; i++) {
-      if (i > 0) await sleep(3000); 
+      if (i > 0) await sleep(2000); 
       const res = await cloudinary.uploader.upload(imageBatch[i], { folder: 'allegro_theory' });
-      const currentImageUrl = res.secure_url;
-      const questionsFromImage = await analyzeExamPaper(imageBatch[i], i, model, mode, subject, seenNumbers); 
+      const questionsFromImage = await analyzeExamPaper(imageBatch[i], i, model, body.mode, subject); 
+      
       if (Array.isArray(questionsFromImage)) {
         questionsFromImage.forEach(q => {
-          const qNum = String(q.num).trim();
-          if (!seenNumbers.includes(qNum)) {
-            allQuestions.push({ ...q, imageUrl: currentImageUrl }); 
-            seenNumbers.push(qNum);
+          if (!seenNumbers.includes(String(q.num))) {
+            allQuestions.push({ ...q, imageUrl: res.secure_url }); 
+            seenNumbers.push(String(q.num));
           }
         });
       }
     }
 
-    if (allQuestions.length > 0) {
-      const scanTimestamp = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
-      const rowsToAdd = allQuestions.map((q, idx) => {
-        const cleanedText = cleanOcrText(q.original_text);
-        return {
-          'id': `${Date.now()}-${idx}`,
-          'sessionId': sessionId || '',
-          'studentId': studentId,
-          'date': testDate || scanTimestamp.split(' ')[0],
-          'scan_date': scanTimestamp,
-          'category': q.category,
-          'title': title,
-          'question_key': `${title} - 第 ${q.num} 題`,
-          'correct_answer': q.correct_answer,
-          'user_answer': q.user_answer,
-          'knowledge_point': notes ? `[註記：${notes}] ${cleanedText}` : cleanedText,
-          'ai_explanation': q.explanation,
-          'image_url': q.imageUrl,
-          'is_mastered': String(q.user_answer).trim() === String(q.correct_answer).trim() ? 'TRUE' : 'FALSE'
-        };
-      });
-      await sheet.addRows(rowsToAdd);
-      return { success: true, data: rowsToAdd };
-    }
-    return { success: true, data: [] };
+    return { success: true, data: allQuestions };
 
   } catch (error) {
     console.error('[Assignments API Error]', error);
