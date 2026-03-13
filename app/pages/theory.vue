@@ -507,6 +507,17 @@ const generateWrongQuestionsPDF = () => {
         .item { margin-bottom: 25px; page-break-inside: avoid; border-bottom: 1px dashed #eee; padding-bottom: 20px; }
         .q-title { font-weight: bold; font-size: 11pt; margin-bottom: 6px; display: flex; justify-content: space-between; }
         .q-content { white-space: pre-wrap; margin-bottom: 12px; font-size: 10.5pt; color: #222; }
+        
+        /* 🚩 圖片樣式優化 */
+        img { 
+          display: block; 
+          max-width: 100%; 
+          max-height: 10cm; 
+          margin: 15px auto; 
+          border: 1px solid #eee; 
+          border-radius: 4px;
+        }
+
         .ans-box { border: 1px solid #333; padding: 8px 12px; margin: 10px 0; display: inline-flex; gap: 25px; font-size: 9.5pt; background: #fafafa; }
         .explanation { margin-top: 8px; font-size: 9pt; color: #555; padding-left: 10px; border-left: 3px solid #eee; }
         .note-area { margin-top: 12px; border: 1px solid #f0f0f0; height: 60px; position: relative; }
@@ -537,6 +548,9 @@ const generateWrongQuestionsPDF = () => {
                       <span style="font-size: 8pt; font-weight: normal; color: #999;">${item.date?.split(' ')[0] || ''}</span>
                     </div>
                     <div class="q-content">${item.knowledge_point || '無內容'}</div>
+                    
+                    ${item.image_url ? `<img src="${item.image_url}">` : ''}
+
                     <div class="ans-box">
                       <span>我的答案：<b>${item.user_answer || '未答'}</b></span>
                       <span>正確答案：<b>${item.correct_answer || '未提供'}</b></span>
@@ -662,7 +676,6 @@ const checkMastery = (item) => {
   return 'FALSE';
 };
 
-// --- 資料同步 ---
 // --- 資料同步 (加上門禁門檻) ---
 const fetchData = async (forceLoading = false) => {
   if (loading.value && !forceLoading) return;
@@ -671,21 +684,21 @@ const fetchData = async (forceLoading = false) => {
   const { getValidConfig } = useAuth();
   const config = getValidConfig();
 
-  // 如果門禁沒過（未登入或資料缺失），getValidConfig 會自動處理跳轉，這裡直接 return
   if (!config) {
     loading.value = false;
     isInitialLoading.value = false;
     return;
   }
 
-  // 2. 💡 統一變數來源（對接門禁驗證後的資料）
+  // 2. 💡 統一變數來源
   const studentId = config.student_id;
   const sheetId = config.sheet_id;
-  const tabName = config.sheet_name;
+  const tabName = config.userName; // 這是學生個人分頁名稱
+  const gasUrl = localStorage.getItem('user_gas_url');
 
-  // 3. 安全檢查：如果關鍵參數還是空的，就不往下跑
-  if (!sheetId || !tabName) {
-    console.warn("[Fetch] 缺少關鍵參數，取消讀取");
+  // 3. 安全檢查
+  if (!sheetId || !tabName || !gasUrl) {
+    console.warn("[Fetch] 缺少關鍵參數或 GAS URL，取消讀取");
     isInitialLoading.value = false;
     return;
   }
@@ -713,22 +726,26 @@ const fetchData = async (forceLoading = false) => {
     setTimeout(() => { loading.value = false; }, 450);
   });
 
-  // --- 5. 執行請求 ---
+  // --- 5. 執行請求 (改接 GAS) ---
   try {
-    const response = await $fetch(`/api/assignments`, { 
-      params: { 
-        studentId, 
-        sheetId,
-        tabName, 
-        t: Date.now() 
-      } 
+    // 💡 改用 fetch 向 GAS 請求該學生的個人分頁資料
+    const response = await fetch(gasUrl, {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'fetch_data',
+        sheetName: tabName // 讀取該學生的分頁
+      })
     });
     
-    if (response && response.success) {
-      questions.value = response.questions || [];
-      console.log(`[Success] 已載入 ${questions.value.length} 筆資料`);
+    const result = await response.json();
+    
+    if (result && result.success) {
+      // 💡 這裡對接原本的 questions.value
+      // GAS 的 fetch_data 已經將資料轉為物件格式，欄位會與原本 API 一致
+      questions.value = result.data || [];
+      console.log(`[Success] 已透過 GAS 載入 ${questions.value.length} 筆資料`);
     } else {
-      console.error("API 報錯:", response.error);
+      console.error("GAS 報錯:", result.error);
     }
   } catch (err) { 
     console.error("Fetch Error:", err); 
@@ -748,31 +765,43 @@ watch(() => userConfig?.sheet_id, (newVal) => {
 
 const updateSingleItem = async (item) => {
   if (!item || !item.id) return;
-  const targetSheetId = userConfig?.sheet_id || JSON.parse(localStorage.getItem('allegro_config') || '{}').sheet_id;
+
+  // 1. 💡 門禁檢查：確保拿到正確的分頁 (不改動門禁邏輯)
+  const { getValidConfig } = useAuth();
+  const config = getValidConfig();
+  if (!config) return;
+
+  const gasUrl = localStorage.getItem('user_gas_url');
+  const tabName = config.userName; // 🛡️ 門禁解析出的正確分頁名
+  
+console.log("updatetabName=",tabName);
+
   try {
-    const res = await $fetch('/api/assignments', { 
-      method: 'POST', 
-      body: { 
-        action: 'update', 
-        sheetId: targetSheetId, 
-        studentId: userConfig.student_id, 
-        updates: [{ 
+    // 💡 改用 GAS 進行簡單的欄位更新
+    const res = await fetch(gasUrl, {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'update', // 💡 對齊後端 action 名稱
+        sheetName: tabName,
+        updates: [{
           id: String(item.id),
-          user_answer: item.user_answer, 
+          user_answer: item.user_answer,
           correct_answer: item.correct_answer,
           knowledge_point: item.knowledge_point,
-          ai_explanation: item.ai_explanation, 
-          category: item.category, 
-          is_mastered: String(checkMastery(item)).toUpperCase() 
-        }] 
-      } 
+          ai_explanation: item.ai_explanation,
+          category: item.category,
+          is_mastered: String(item.user_answer === item.correct_answer).toUpperCase()
+        }]
+      })
     });
-    if (res.success) { 
-      syncSuccess.value = true; 
-      setTimeout(() => { syncSuccess.value = false; }, 2000); 
+
+    const result = await res.json();
+    if (result.success) {
+      syncSuccess.value = true;
+      setTimeout(() => { syncSuccess.value = false; }, 2000);
     }
-  } catch (err) { 
-    showAlert("同步失敗", "連線失敗", "error");
+  } catch (err) {
+    console.error("GAS Update Error:", err);
   }
 };
 
@@ -1135,6 +1164,17 @@ const saveRecord = async () => {
     });
 
     if (res.success) {
+      if (res.data && res.data.length > 0) {
+        const gasUrl = localStorage.getItem('user_gas_url');
+        await fetch(gasUrl, {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'append_batch',
+            sheetName: config.sheet_name,
+            data: res.data // 直接把 Vercel 辨識完的陣列塞給 GAS 寫入
+          })
+        });
+      }
       // --- 🚩 以下所有功能邏輯「完全保留」，不做變動 ---
       if (res.data && Array.isArray(res.data)) {
         const uniqueData = [];
@@ -1200,7 +1240,7 @@ const executeDelete = async () => {
   const target = deleteModal.value.session; 
   if (!target) return;
 
-  // 1. 💡 門禁檢查：確保操作者身分合法
+  // 1. 💡 門禁檢查：確保操作者身分合法 (維持舊有設計)
   const { getValidConfig } = useAuth();
   const config = getValidConfig();
 
@@ -1211,8 +1251,10 @@ const executeDelete = async () => {
   }
 
   isDeleting.value = true;
-  // 🚩 核心修正：手動指定狀態為 'del'，這樣文字就會變成「正在刪除此卷別...」
+  // 🚩 核心修正：手動指定狀態為 'del'，觸發載入文字變更
   activeTab.value = 'del';
+
+  const gasUrl = localStorage.getItem('user_gas_url');
 
   // --- 🚩 關鍵修正：判斷是「單題刪除」還是「整卷刪除」 (邏輯完全保留) ---
   let targetIds = [];
@@ -1243,27 +1285,29 @@ const executeDelete = async () => {
     showAlert('提醒', '找不到對應的題目 ID', 'error');
     deleteModal.value.show = false;
     isDeleting.value = false;
-    activeTab.value = 'review'; // 補回狀態重置
+    activeTab.value = 'review'; 
     return;
   }
 
   try {
-    const res = await $fetch('/api/assignments', {
+    // 💡 2. 核心修改點：改接 GAS，並對齊動作「I」的邏輯
+    const response = await fetch(gasUrl, {
       method: 'POST',
-      body: {
-        action: 'deleteAssignment',
-        ids: targetIds, 
-        // 💡 這裡改用門禁工具驗證後的參數
-        studentId: config.student_id,
-        sheetId: config.sheet_id
-      }
+      body: JSON.stringify({
+        action: 'deleteAssignment', // 對應 GAS 腳本中的動作 I
+        sheetName: config.sheet_name, // 🛡️ 門禁解析的分頁名稱
+        ids: targetIds,               // 傳入要刪除的 ID 陣列
+        studentId: config.student_id  // 額外傳入身分標記（選用）
+      })
     });
+
+    const res = await response.json();
 
     if (res.success) {
       deleteModal.value.show = false; 
       showAlert('刪除成功', `已移除 ${targetIds.length} 筆紀錄`, 'success');
       
-      // 同步更新畫面上的資料 (保持不變)
+      // 同步更新畫面上的資料 (維持原設計)
       questions.value = questions.value.filter(q => !targetIds.includes(String(q.id)));
       
       if (!target.id) {
@@ -1284,25 +1328,21 @@ const executeDelete = async () => {
 };
 
 const reAnalyzeItem = async (item) => {
-  // 1. 防止重複觸發
   if (item.isAnalyzing) return; 
   
-  // 2. 取得必要的 ID（參考你提供的 updateSingleItem 邏輯）
-  const targetSheetId = userConfig?.sheet_id || JSON.parse(localStorage.getItem('allegro_config') || '{}').sheet_id;
-  const studentId = userConfig?.student_id || JSON.parse(localStorage.getItem('allegro_config') || '{}').student_id;
+  const { getValidConfig } = useAuth();
+  const config = getValidConfig();
+  if (!config) return;
 
-  item.isAnalyzing = true; 
+  item.isAnalyzing = true;
   try {
     const response = await $fetch('/api/assignments', {
       method: 'POST',
       body: {
         action: 're_analyze',
-        // 🚩 這裡現在有定義了
-        sheetId: targetSheetId, 
-        studentId: studentId, 
+        sheetId: config.sheet_id,  // 使用門禁工具的變數
+        studentId: config.student_id, 
         subject: selectedSubject.value,
-        
-        // 傳送修正後的內容
         question_text: item.knowledge_point, 
         correct_answer: item.correct_answer
       }
