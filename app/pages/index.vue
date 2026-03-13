@@ -155,22 +155,8 @@ const getSubjectBaseColor = (subjectName) => {
 const loadBugs = async () => {
   if (process.server || isFetching) return; 
   
-  // 🚩 門禁介入：取代原本手動 getSessionData 的邏輯
   const auth = getValidConfig(true);
-
   if (!auth) {
-    isLoading.value = false;
-    return;
-  }
-
-  // 🚩 資料對齊：將門禁回傳的資料轉為原本代碼使用的 session 變數格式
-  // 這樣後面的 res = await $fetch 邏輯完全不需要更動
-  const session = {
-    id: auth.student_id,
-    sid: auth.sheet_id
-  };
-
-  if (!session.id) {
     isLoading.value = false;
     return;
   }
@@ -179,21 +165,47 @@ const loadBugs = async () => {
   isLoading.value = true;
   
   try {
-    const res = await $fetch('/api/clinic-all', {
-      query: { 
-        studentId: session.id, // 保持原本的參數名稱
-        sheetId: session.sid,   // 保持原本的參數名稱
-        t: Math.floor(Date.now() / 5000) 
-      } 
+    const gasUrl = localStorage.getItem('user_gas_url');
+    // 🚩 重要：對齊後端邏輯，分頁名稱加上 _Clinic
+    const targetSheetName = `${auth.userName}_Clinic`;
+
+    // 🚩 使用原生 fetch 避開 CORS 預檢請求 (Preflight)
+    const response = await fetch(gasUrl, {
+      method: 'POST',
+      mode: 'cors',
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8' 
+      },
+      body: JSON.stringify({
+        action: 'fetch_data',
+        sheetName: targetSheetName
+      })
     });
 
-    if (res.success) {
-      allBugs.value = res.data || [];
+    const res = await response.json();
+
+    if (res.success && res.data) {
+      // 🚩 資料格式轉換 (對齊 Clinic 頁面的 UI 欄位)
+      allBugs.value = res.data
+        .filter(r => {
+          const isMastered = String(r.is_mastered || r.Mastered || '').trim().toUpperCase();
+          return isMastered !== 'TRUE' && (r.title || r.Title);
+        })
+        .map((r, index) => ({
+          // 這裡兼容後端不同的欄位命名慣例 (大小寫或 key 名)
+          id: r.id || `${auth.userName}-${index}`,
+          subject: r.subject || r.Category || (targetSheetName.split('_')[0]),
+          category: r.tags || r.Category || '一般',
+          title: r.title || r.Title,
+          summary: r.summary || r['Knowledge Point'] || r.ai_explanation || '',
+          date: r.date || r.Date || '2024-01-01'
+        }));
+    } else {
+      console.warn('GAS 回傳失敗:', res.error);
     }
   } catch (err) {
-    console.error('API 請求異常:', err);
+    console.error('GAS 讀取異常 (可能是 CORS 或 URL 錯誤):', err);
   } finally {
-    // 延遲關閉，確保視覺過渡平滑 (原本的 400ms 保持不變)
     setTimeout(() => {
       isLoading.value = false;
       isFetching = false; 
