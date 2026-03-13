@@ -1119,91 +1119,77 @@ const masteryComment = computed(() => {
 });
 
 const saveRecord = async () => {
-  // 1. 強化前置檢查 (保持不變)
   if (loading.value || imageFiles.value.length === 0) return;
   
-  // 2. 💡 門禁檢查：取代原本手動撈 localStorage 的邏輯
   const { getValidConfig } = useAuth();
   const config = getValidConfig();
-
-  // 如果門禁沒過，直接中斷（工具會自動處理報錯或跳轉）
   if (!config) return;
 
-  // 💡 統一從門禁工具取得驗證後的身分資訊
-  const currentId = config.student_id;
   const targetSheetId = config.sheet_id;
-  const tabName = config.sheet_name; // 對應原本的 Nina 等名稱
-
-  // Debug 檢查 (保持原有的除錯習慣)
-  console.log("上傳目標：", { studentId: currentId, sheetId: targetSheetId, tabName });
-
-  // 3. 原有的安全檢查邏輯
-  if (!targetSheetId || !tabName) {
-    showAlert("系統提示", "找不到您的個人分頁設定，請重新登入", "error");
-    return;
-  }
+  const tabName = config.userName; 
 
   loading.value = true;
   uploadStatus.value = gradingMode.value === 'ai' ? 'AI 批改中...' : 'AI 診斷中...';
 
   try {
+    // 1. 呼叫 Vercel (現在只負責 AI 辨識，不負責存檔)
     const res = await $fetch('/api/assignments', {
       method: 'POST',
       body: { 
-        action: 'upload', 
-        sheetId: targetSheetId, 
-        tabName: tabName, 
-        studentId: currentId,
-        title: form.question_key || '未命名考卷',
+        action: 'upload', // 對應後端的 C 模式
         imageBatch: imageFiles.value, 
-        testDate: form.test_date, 
-        notes: form.knowledge_point, 
         subject: selectedSubject.value,
-        mode: gradingMode.value 
+        mode: gradingMode.value,
+        userConfig: config // 傳入門禁配置供 Vercel 使用 Key
       }
     });
+    console.log("Vercel 辨識結果:", res); // 👈 加這一行
+    if (res.success && res.data) {
+      const rowsToSave = res.data.map(item => ({
+        id: `task-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+        date: form.test_date || new Date().toISOString().split('T')[0],
+        scan_date: new Date().toLocaleString(),
+        category: item.category || '未分類',
+        title: form.question_key || '未命名考卷',
+        question_key: `第 ${item.num} 題`,
+        correct_answer: item.correct_answer,
+        user_answer: item.user_answer || '',
+        knowledge_point: item.original_text, // 對齊 Vercel 的 original_text
+        image_url: item.imageUrl,           // 對齊 Vercel 的 imageUrl
+        is_mastered: item.is_mastered ? 'TRUE' : 'FALSE',
+        ai_explanation: item.explanation    // 對齊 Vercel 的 explanation
+      }));
 
-    if (res.success) {
-      if (res.data && res.data.length > 0) {
-        const gasUrl = localStorage.getItem('user_gas_url');
-        await fetch(gasUrl, {
-          method: 'POST',
-          body: JSON.stringify({
-            action: 'append_batch',
-            sheetName: config.sheet_name,
-            data: res.data // 直接把 Vercel 辨識完的陣列塞給 GAS 寫入
-          })
-        });
-      }
-      // --- 🚩 以下所有功能邏輯「完全保留」，不做變動 ---
-      if (res.data && Array.isArray(res.data)) {
-        const uniqueData = [];
-        const seenNums = new Set();
-        
-        res.data.forEach(item => {
-          const qNum = String(item.num || item.question_key);
-          if (!seenNums.has(qNum)) {
-            uniqueData.push(item);
-            seenNums.add(qNum);
-          }
-        });
-        
-        latestScanResults.value = uniqueData;
-      }
+      const gasUrl = localStorage.getItem('user_gas_url');
+      
+      // ✅ 這裡一定要先宣告 gasRes
+      const gasRes = await fetch(gasUrl, {
+        method: 'POST',
+        mode: 'cors',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({
+          action: 'append_batch',
+          sheetName: tabName,
+          data: rowsToSave 
+        })
+      });
 
-      await fetchData(true);
+      // ✅ 這樣這行才不會報 initialization 錯誤
+      const gasResult = await gasRes.json(); 
       
-      imageFiles.value = [];
-      form.question_key = '';
-      form.knowledge_point = ''; 
-      
-      syncSuccess.value = true;
-      setTimeout(() => { syncSuccess.value = false; }, 3000);
-      
-      activeTab.value = 'review';
-      showAlert("儲存成功", `已完成 ${res.data?.length || 0} 題辨識並同步至 ${tabName}`, "success");
-    } else {
-      throw new Error(res.error || '未知錯誤');
+      if (gasResult.success) {
+        latestScanResults.value = rowsToSave;
+        await fetchData(true);
+        
+        imageFiles.value = [];
+        form.question_key = '';
+        form.knowledge_point = ''; 
+        syncSuccess.value = true;
+        activeTab.value = 'review';
+        showAlert("儲存成功", `已辨識 ${rowsToSave.length} 題並存入雲端`, "success");
+      } else {
+        throw new Error(gasResult.message || 'GAS 存檔失敗');
+      }
     }
   } catch (err) {
     console.error("Save Record Error:", err);
