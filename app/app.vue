@@ -84,9 +84,7 @@
         >
           登入系統 / Sign In
         </button>
-        <button @click="isRegisterMode = true" class="text-[10px] text-[#A0A0A0] hover:text-[#333333] tracking-widest uppercase underline underline-offset-4 decoration-[#EEEBE5]">
-          第一次使用？點此註冊
-        </button>
+
       </div>
     </div>
 
