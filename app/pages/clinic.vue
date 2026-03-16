@@ -762,20 +762,33 @@ const fetchStudentData = async (forceLoading = false) => {
   }
 
   try {
-    const response = await $fetch('/api/assignments', {
-      params: { 
-        studentId: auth.student_id,
-        sheetId: auth.sheet_id,
-        tabName: auth.sheet_name, 
-        t: Date.now() 
-      }
+    // 🚩 從原本的 Vercel API 改為請求 GAS
+    const gasUrl = localStorage.getItem('user_gas_url');
+    
+    const response = await fetch(gasUrl, {
+      method: 'POST',
+      mode: 'cors',
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8'
+      },
+      body: JSON.stringify({
+        action: 'fetch_data',
+        sheetName: auth.userName, // 傳入 Emma (原本的 tabName)
+        studentId: auth.student_id  // 保持結構一致性
+      })
     });
 
-    if (response?.success) {
-      allQuestions.value = response.questions || [];
+    const result = await response.json();
+
+    // 🚩 保持原本設計：將結果存入 allQuestions.value
+    // 注意：GAS 回傳的是 { success: true, data: [...] }
+    if (result?.success) {
+      allQuestions.value = result.data || [];
+      console.log('✅ 題庫同步成功，總數:', allQuestions.value.length);
     }
   } catch (e) {
     console.error('❌ [Clinic Fetch Error]', e);
+    showToast('無法讀取題庫，請確認網路連線', 'error');
   } finally {
     // 🚩 結束後關閉轉圈
     if (forceLoading) {
@@ -789,102 +802,126 @@ const fetchStudentData = async (forceLoading = false) => {
 const fetchTargetDiagnosis = async (params = {}) => {
   if (process.server) return;
   
-  // 🛡️ 🚩 門禁守衛：取代原本手動讀取 localStorage 的邏輯
+  // 🛡️ 門禁守衛
   const auth = getValidConfig();
-  if (!auth) return; // 若無權限，useAuth 會處理跳轉，這裡直接攔截
+  if (!auth) return; 
 
-  // 🚩 確保即使在跳轉瞬間，也能抓到正確的參數
   const studentId = auth.student_id;
   const sheetId = auth.sheet_id;
   const sub = params.subject || selectedSubject.value;
   const tit = params.title || selectedTitle.value || '全部卷別';
 
   try {
-    const response = await $fetch('/api/clinic-history', {
-      params: { 
-        studentId, 
-        sheetId,
-        subject: sub, // 🚩 使用處理過的變數
-        title: tit,   // 🚩 使用處理過的變數
-        t: Date.now()
-      }
+    // 🚩 核心修改：切換為 GAS 請求
+    const gasUrl = localStorage.getItem('user_gas_url');
+    const targetSheetName = `${auth.userName}_Clinic`; // 對齊後端 xxxx_Clinic 邏輯
+
+    const response = await fetch(gasUrl, {
+      method: 'POST',
+      mode: 'cors',
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8' 
+      },
+      body: JSON.stringify({
+        action: 'fetch_data',
+        sheetName: targetSheetName
+      })
     });
 
-    if (response.success && response.data) {
-      const d = response.data;
-      const extraData = safeParse(d.diagnosis_json) || {};
-      
-      // 🚩 1. 解析並準備修改
-      let rawQuizzes = safeParse(d.quizzes) || extraData.quizzes || {};
-      let rawResults = safeParse(d.quiz_results) || extraData.quiz_results || {};
+    const res = await response.json();
 
-      // --- 🚩 修正區塊：同時攤平 Quizzes 與 Results 的巢狀結構 (保持原樣) ---
-      Object.keys(rawQuizzes).forEach(vKey => {
-        const val = rawQuizzes[vKey];
-        if (val && typeof val === 'object' && !Array.isArray(val)) {
-          const innerKeys = Object.keys(val);
-          if (innerKeys.length > 0) rawQuizzes[vKey] = val[innerKeys[0]];
+    // 🚩 模擬原本 Vercel 的 response.success && response.data 結構
+    // 從 GAS 回傳的陣列中找到匹配科目與卷別的一列
+    if (res.success && res.data) {
+      const foundData = res.data.find(r => 
+        String(r.subject || r.Subject || '').trim() === String(sub).trim() && 
+        String(r.title || r.Title || '').trim() === String(tit).trim()
+      );
+
+      if (foundData) {
+        // --- 🟢 以下完全保留你原始的解析與攤平邏輯，不做任何更動 ---
+        const d = foundData;
+        const extraData = safeParse(d.diagnosis_json) || {};
+        
+        // 解析並準備修改
+        let rawQuizzes = safeParse(d.quizzes) || extraData.quizzes || {};
+        let rawResults = safeParse(d.quiz_results) || extraData.quiz_results || {};
+
+        // 攤平 Quizzes 與 Results 的巢狀結構
+        Object.keys(rawQuizzes).forEach(vKey => {
+          const val = rawQuizzes[vKey];
+          if (val && typeof val === 'object' && !Array.isArray(val)) {
+            const innerKeys = Object.keys(val);
+            if (innerKeys.length > 0) rawQuizzes[vKey] = val[innerKeys[0]];
+          }
+        });
+
+        Object.keys(rawResults).forEach(vKey => {
+          const val = rawResults[vKey];
+          if (val && typeof val === 'object' && !Array.isArray(val)) {
+            const innerKeys = Object.keys(val);
+            if (innerKeys.length > 0) rawResults[vKey] = val[innerKeys[0]];
+          }
+        });
+
+        const versions = Object.keys(rawQuizzes);
+        const lastVer = versions.length > 0 ? versions[versions.length - 1] : 'v1';
+        currentVersion.value = lastVer; 
+
+        const rawIsMastered = d.is_mastered ?? extraData.is_mastered;
+        const isMastered = rawIsMastered === true || String(rawIsMastered).toUpperCase() === 'TRUE';
+
+        clinicData.value = {
+          summary: d.summary || extraData.summary,
+          tags: safeParse(d.tags) || extraData.tags || [],
+          actions: safeParse(d.actions) || extraData.actions || [],
+          wrongIds: safeParse(d.wrongIds) || extraData.wrongIds || [],
+          date: d.date || d.Date,
+          is_mastered: isMastered,
+          quizzes: rawQuizzes,        
+          quiz_results: rawResults    
+        };
+        
+        const currentQuizzes = rawQuizzes[lastVer] || [];
+        const currentResults = rawResults[lastVer] || [];
+
+        if (Array.isArray(currentQuizzes) && currentQuizzes.length > 0) {
+          practiceQuizzes.value = currentQuizzes;
+          userAnswers.value = {};
+          if (isMastered) {
+            const restoredAnswers = {};
+            currentQuizzes.forEach((_, idx) => {
+              const savedRes = currentResults[idx];
+              restoredAnswers[idx] = { 
+                isCorrect: true, 
+                selected: (savedRes && typeof savedRes.selected !== 'undefined') ? savedRes.selected : null,
+                isWrong: false
+              };
+            });
+            userAnswers.value = restoredAnswers; 
+          }
+        } else {
+          practiceQuizzes.value = [];
+          userAnswers.value = {};
         }
-      });
-
-      Object.keys(rawResults).forEach(vKey => {
-        const val = rawResults[vKey];
-        if (val && typeof val === 'object' && !Array.isArray(val)) {
-          const innerKeys = Object.keys(val);
-          if (innerKeys.length > 0) rawResults[vKey] = val[innerKeys[0]];
-        }
-      });
-      // --- 修正結束 ---
-
-      const versions = Object.keys(rawQuizzes);
-      const lastVer = versions.length > 0 ? versions[versions.length - 1] : 'v1';
-      currentVersion.value = lastVer; 
-
-      const rawIsMastered = d.is_mastered ?? extraData.is_mastered;
-      const isMastered = rawIsMastered === true || String(rawIsMastered).toUpperCase() === 'TRUE';
-
-      clinicData.value = {
-        summary: d.summary || extraData.summary,
-        tags: safeParse(d.tags) || extraData.tags || [],
-        actions: safeParse(d.actions) || extraData.actions || [],
-        wrongIds: safeParse(d.wrongIds) || extraData.wrongIds || [],
-        date: d.date,
-        is_mastered: isMastered,
-        quizzes: rawQuizzes,        
-        quiz_results: rawResults    
-      };
-      
-      const currentQuizzes = rawQuizzes[lastVer] || [];
-      const currentResults = rawResults[lastVer] || [];
-
-      if (Array.isArray(currentQuizzes) && currentQuizzes.length > 0) {
-        practiceQuizzes.value = currentQuizzes;
-        userAnswers.value = {};
-        if (isMastered) {
-          const restoredAnswers = {};
-          currentQuizzes.forEach((_, idx) => {
-            const savedRes = currentResults[idx];
-            restoredAnswers[idx] = { 
-              isCorrect: true, 
-              selected: (savedRes && typeof savedRes.selected !== 'undefined') ? savedRes.selected : null,
-              isWrong: false
-            };
-          });
-          userAnswers.value = restoredAnswers; 
-        }
+        isTitleDiagnosed.value = true;
+        // --- 🟢 原始邏輯結束 ---
       } else {
+        // 找不到對應科目卷別的紀錄
+        clinicData.value = null;
+        isTitleDiagnosed.value = false;
         practiceQuizzes.value = [];
-        userAnswers.value = {};
+        userAnswers.value = {}; 
       }
-      isTitleDiagnosed.value = true;
     } else {
+      // 請求失敗
       clinicData.value = null;
       isTitleDiagnosed.value = false;
       practiceQuizzes.value = [];
       userAnswers.value = {}; 
     }
   } catch (e) {
-    console.error("❌ [Clinic History Fetch Error]:", e);
+    console.error("❌ [GAS Clinic History Fetch Error]:", e);
   }
   await new Promise(resolve => setTimeout(resolve, 800));
 };
@@ -908,7 +945,7 @@ const handleStartDiagnosis = async (force = false) => {
   isAnalyzing.value = true;
 
 // 🚩 現在 displayName 會是「碼農媽媽」而非「s001」
-  const displayName = auth.student_name; 
+  const displayName = auth.userName; 
   isAnalyzing.value = true;
 
   try {
@@ -1139,45 +1176,53 @@ const currentSubjectErrors = computed(() => {
 
 // 存檔邏輯
 const saveDiagnosisToSheet = async (data) => {
-  // 🛡️ 🚩 門禁守衛：直接取得驗證過的配置
   const auth = getValidConfig();
-  if (!auth) return; // 若無權限則中斷
+  if (!auth) return;
 
   loading.value = true;
   uploadStatus.value = "正在同步思維修正至檔案庫...";
 
-  // 🚩 使用從 auth 取得的穩定 ID，取代原本的 localStorage/session 混合判斷
   const studentId = auth.student_id;
-  const sheetId = auth.sheet_id;
+  const gasUrl = localStorage.getItem('user_gas_url');
+  const targetSheetName = `${auth.userName}_Clinic`;
 
-  let finalTitle = data.title || clinicData.value?.title || selectedTitle.value;
-
-  // 🚩 保持原始 Payload 結構不變
-  const sheetPayload = {
-    studentId: studentId,
-    sheetId: sheetId,
-    subject: selectedSubject.value,
-    title: finalTitle, 
-    diagnosis: {
-      summary: data.summary,
-      tags: data.tags,
-      actions: data.actions,
-      quizzes: data.quizzes,
-      wrongIds: data.wrongIds || clinicData.value?.wrongIds || [], 
-      is_mastered: data.is_mastered || false,
-      quiz_results: data.quiz_results || []
-    }
-  };
+  // 🛡️ 保護：確保標題與診斷物件存在
+  let finalTitle = data?.title || clinicData.value?.title || selectedTitle.value || "全部卷別";
 
   try {
-    const response = await $fetch('/api/clinic-save', { 
-      method: 'POST', 
-      body: sheetPayload 
+    const response = await fetch(gasUrl, {
+      method: 'POST',
+      mode: 'cors',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        action: 'save_diagnosis', // 🚩 這裡要對應 GAS 裡的 if (action === 'save_diagnosis')
+        sheetName: targetSheetName,
+        subject: selectedSubject.value,
+        title: finalTitle,
+        // 🚩 直接傳送診斷物件，讓 GAS 處理「版本合併」與「JSON 字串化」
+        diagnosis: {
+          summary: data.summary || "",
+          tags: data.tags || [],
+          actions: data.actions || [],
+          quizzes: Array.isArray(data.quizzes) ? data.quizzes : Object.values(data.quizzes)[0],
+          wrongIds: data.wrongIds || clinicData.value?.wrongIds || [],
+          is_mastered: data.is_mastered || false,
+          quiz_results: data.quiz_results || []
+        }
+      })
     });
-    console.log("✅ 存檔與同步結果：", response.message);
+
+    const result = await response.json();
+    
+    if (result.success) {
+      console.log("✅ GAS 存檔成功：", result.message);
+    } else {
+      // 🚩 如果 GAS 報 ReferenceError，這裡會抓到並顯示
+      throw new Error(result.error);
+    }
   } catch (error) {
     console.error("❌ 存檔請求失敗:", error);
-    showToast('同步失敗，請手動刷新', 'error');
+    showToast(`同步失敗: ${error.message}`, 'error');
   } finally {
     loading.value = false;
     uploadStatus.value = "";
