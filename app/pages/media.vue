@@ -999,20 +999,26 @@ const saveNewSession = async () => {
   uploadStatus.value = '正在處理 AI 命題與同步...';
   
   try {
-    // 1. 🚀 先叫 Vercel 後端幫忙出題 (純 AI 運算)
-    const response = await $fetch('/api/sessions', {
-      method: 'POST',
-      body: {
-        action: 'generateQuizOnly', // 💡 改用純 AI 模式
-        userConfig: { gemini_key: auth.gemini_key },
-        sessionData: {
-          topic: newSession.value.topic,
-          points: newSession.value.pointsRaw.split('\n').filter(p => p.trim()),
-          quizMode: newSession.value.quizMode,
-          quizCount: newSession.value.quizCount || 10
-        }
-      }
-    });
+      const gasUrl = localStorage.getItem('user_gas_url'); // 🚩 取得 GAS URL
+      
+      // 💡 注意：這裡改用原生 fetch 或你封裝好的 GAS 請求工具
+      const response = await $fetch(gasUrl, { 
+        method: 'POST',
+        // GAS 不支援 CORS 的 json 格式，改用 text/plain 繞過
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' }, 
+        body: JSON.stringify({
+          action: 'publishSession', // 🚩 指向我們剛剛加進 GAS 的動作
+          sessionData: {
+            sessionId: 'SID-' + Date.now(),
+            date: new Date().toLocaleDateString('zh-TW'),
+            topic: newSession.value.topic,
+            category: newSession.value.category,
+            points: newSession.value.pointsRaw.split('\n').filter(p => p.trim()),
+            quizMode: newSession.value.quizMode,
+            student_id: userConfig.student_id
+          }
+        })
+      });
 
 if (response.success) {
   const newSid = 'SID-' + Date.now();
