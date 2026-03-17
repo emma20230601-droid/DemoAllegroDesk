@@ -1051,7 +1051,7 @@ if (response.success) {
         date: new Date().toLocaleDateString('en-CA'),
         topic: newSession.value.topic,
         category: newSession.value.category,
-        points: JSON.stringify(newSession.value.pointsRaw.split('\n').filter(p => p.trim())), 
+        points: pointsArray, 
         quizTitle: '隨堂挑戰',
         quizMode: newSession.value.quizMode,
         student_id: auth.student_id || auth.studentId || "" 
