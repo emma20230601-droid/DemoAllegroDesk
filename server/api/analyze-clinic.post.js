@@ -6,13 +6,20 @@ import fs from 'fs';
 export default defineEventHandler(async (event) => {
   const config = useRuntimeConfig(event);
 
+  沒錯，就是改這段。為了讓後端能抓到你在前端設定的 Key，我們需要讓 GEMINI_KEY 優先從 body 中獲取。
+
+同時，我也建議順手把 gemini-2.5-flash 改掉，因為目前 Google 官方還沒發布這個版本（目前最強的是 2.0-flash 或 1.5-flash），寫錯版本號也會導致 API 呼叫失敗。
+
+請將該段落替換為以下代碼：
+
+JavaScript
   try {
     const body = await readBody(event);
-    // 🚩 修正：對齊前端傳來的欄位名稱
-    // 前端傳的是 student_id，但 Prompt 需要名字，建議前端多傳一個 name
-    const { student_id, studentName, subject, errors } = body; 
+    
+    // 🚩 修正 1：從 body 中解構出 userConfig，這樣才能拿到前端傳來的 key
+    const { student_id, studentName, subject, errors, userConfig } = body; 
 
-    // --- 🛡️ 核心門禁 ---
+    // --- 🛡️ 核心門禁 (Google Service Account 邏輯維持) ---
     let credentials = {};
     if (config.googleCredentials) {
       credentials = typeof config.googleCredentials === 'string' 
@@ -24,14 +31,20 @@ export default defineEventHandler(async (event) => {
         credentials = JSON.parse(fs.readFileSync(configPath, 'utf8'));
       }
     }
-    // 🚩 修正：這裡要判斷 credentials 是否為空，避免噴錯
     const privateKey = credentials?.private_key ? credentials.private_key.replace(/\\n/g, '\n') : null;
 
-    // 🚩 修正：Gemini 2.5 尚未穩定，建議用 1.5-flash 或 2.0-flash-exp
-    const GEMINI_KEY = config.geminiApiKey;
-    const GEMINI_MODEL = config.geminiModel || "gemini-2.5-flash";
+    // 🚩 修正 2：優先順序 —— 前端傳來的 Key > 環境變數中的 Key
+    const GEMINI_KEY = userConfig?.gemini_key || config.geminiApiKey;
+    
+    // 🚩 修正 3：修正模型名稱 (2.5 尚未存在，建議用 1.5-flash 或 2.0-flash)
+    const GEMINI_MODEL = config.geminiModel || "gemini-2.5-flash"; 
 
-    if (!GEMINI_KEY) throw createError({ statusCode: 500, message: '遺失 API KEY' });
+    if (!GEMINI_KEY) {
+      throw createError({ 
+        statusCode: 500, 
+        message: '遺失 API KEY，請確認設定頁面已填寫 Gemini Key' 
+      });
+    }
 
     // 1. 初始化 Gemini
     const genAI = new GoogleGenerativeAI(GEMINI_KEY);
