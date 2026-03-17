@@ -8,7 +8,7 @@
         </div>
         <p class="text-[10px] font-bold text-gray-400 tracking-[0.3em] uppercase">
           PATIENT: {{ currentStudent }} | DEPT: {{ selectedSubject }}
-        </p>
+        </p> 
       </div>
       <div class="text-[10px] text-gray-400 font-bold mb-2">
         正在掃描細項：{{ subjectConfigs[selectedSubject]?.cats.join('、') }}
