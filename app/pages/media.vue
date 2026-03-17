@@ -360,21 +360,25 @@
       <h2 class="text-2xl font-bold text-slate-800 leading-relaxed mb-10">
         {{ currentQuestion.q }}
       </h2>
-
       <div class="grid grid-cols-1 gap-5">
-  <button v-for="(opt, oIdx) in currentQuestion.options" :key="oIdx"
-    @click="handleAnswer(opt)"
-    class="group w-full p-6 rounded-2xl border-2 border-slate-50 hover:border-blue-100 hover:bg-blue-50/30 transition-all text-left flex items-center gap-5 shadow-sm hover:shadow-md hover:translate-x-2"
-  >
-    <div class="flex-shrink-0 w-10 h-10 rounded-full bg-slate-100 group-hover:bg-blue-600 group-hover:text-white flex items-center justify-center text-lg font-black text-slate-400 transition-colors">
-      {{ String.fromCharCode(65 + oIdx) }}
-    </div>
+        <button v-for="(opt, oIdx) in currentQuestion.options" 
+          :key="currentIdx + '-' + oIdx"
+          @click="handleAnswer(opt)"
+          class="group w-full p-5 sm:p-6 rounded-3xl border-2 border-slate-100 
+                hover:border-blue-500 hover:bg-blue-50 
+                active:scale-[0.98] active:bg-blue-100 
+                transition-all flex items-start gap-5 shadow-sm"
+        >
 
-    <div class="text-lg font-medium text-slate-700">
-      {{ opt }}
-    </div>
-  </button>
-</div>
+          <div class="flex-shrink-0 w-11 h-11 rounded-2xl bg-slate-100 group-hover:bg-blue-600 group-hover:text-white flex items-center justify-center text-xl font-black text-slate-500 transition-colors shadow-inner">
+            {{ String.fromCharCode(65 + oIdx) }}
+          </div>
+
+          <div class="text-lg font-bold text-slate-700 pt-1.5 leading-snug text-left">
+            {{ opt }}
+          </div>
+        </button>
+      </div>
     </div>
 
     <Transition name="fade-in-scale">
@@ -875,6 +879,7 @@ const handleAnswer = async (selected) => {
   const correctText = qData.a; 
   const isCorrect = selected === correctText;
   
+  // 1. 先存入本次答案
   quizResults.value.push({
     question: qData.q,
     options: qData.options,
@@ -887,42 +892,55 @@ const handleAnswer = async (selected) => {
   lastAnswerStatus.value = isCorrect ? 'correct' : 'incorrect';
   showFeedback.value = true;
 
-  setTimeout(async () => {
-  showFeedback.value = false;
-  
-  if (currentIdx.value + 1 < totalQuestions.value) {
-    currentIdx.value++;
-    isProcessing.value = false; 
+  // 判斷是否為最後一題
+  const isLastQuestion = currentIdx.value + 1 >= totalQuestions.value;
+
+  if (!isLastQuestion) {
+    // --- 情況 A：還有下一題，維持 1.2 秒回饋時間 ---
+    setTimeout(() => {
+      showFeedback.value = false;
+      currentIdx.value++;
+      isProcessing.value = false; 
+    }, 1200);
+    
   } else {
-    // 🛡️ 確保此時 activeQuiz 還在才執行快照
-    if (!activeQuiz.value) return;
-    const quizSnapshot = { ...activeQuiz.value };
-
-    try {
-      if (showToast) showToast('正在儲存成績與記錄...');
-      
-      await Promise.all([
-        finishAndSubmitQuiz(quizSnapshot), 
-        saveQuizResult(quizSnapshot)       
-      ]);
-
-      if (showToast) showToast('✅ 紀錄已成功同步');
-    } catch (err) {
-      console.error("存檔過程發生錯誤:", err);
-    } finally {
-      // ✨ 重點：先重置索引，最後才把 activeQuiz 設為 null
-      // 這樣可以避免 Vue 在切換畫面時，currentQuestion 還在讀取不存在的索引
-      isProcessing.value = false;
+    // --- 情況 B：最後一題，直接進入結算流程 ---
+    // 💡 我們可以只留 500ms 讓用戶看最後一題的對錯，然後馬上轉圈
+    setTimeout(async () => {
       showFeedback.value = false;
       
-      // 🚀 關鍵操作：先讓索引歸零，再讓測驗物件消失
-      currentIdx.value = 0; 
-      activeQuiz.value = null; 
-      
-      quizResults.value = []; 
-    }
+      // 🛡️ 確保此時 activeQuiz 還在才執行快照
+      if (!activeQuiz.value) return;
+      const quizSnapshot = { ...activeQuiz.value };
+
+      // 🔄 顯示全域轉圈 (你可以根據你的 UI 變數調整)
+      isAnalyzing.value = true; 
+      uploadStatus.value = '正在儲存最終成績...';
+
+      try {
+        if (showToast) showToast('正在儲存成績與記錄...');
+        
+        // 🚀 並行執行多個存檔動作
+        await Promise.all([
+          finishAndSubmitQuiz(quizSnapshot), 
+          saveQuizResult(quizSnapshot)       
+        ]);
+
+        if (showToast) showToast('✅ 紀錄已成功同步');
+      } catch (err) {
+        console.error("存檔過程發生錯誤:", err);
+      } finally {
+        // ✨ 重置所有狀態
+        isProcessing.value = false;
+        isAnalyzing.value = false; // 關閉轉圈
+        uploadStatus.value = '';
+        
+        currentIdx.value = 0; 
+        activeQuiz.value = null; 
+        quizResults.value = []; 
+      }
+    }, 600); // 縮短至 0.6 秒，體感會流暢很多
   }
-}, 1200);
 };
 // --- 功能：完成並上傳成績 ---
 // 傳入 snapshot 作為參數
@@ -999,27 +1017,23 @@ const saveNewSession = async () => {
   uploadStatus.value = '正在處理 AI 命題與同步...';
   
   try {
-      const gasUrl = localStorage.getItem('user_gas_url'); // 🚩 取得 GAS URL
-      
-      // 💡 注意：這裡改用原生 fetch 或你封裝好的 GAS 請求工具
-      const response = await $fetch(gasUrl, { 
-        method: 'POST',
-        // GAS 不支援 CORS 的 json 格式，改用 text/plain 繞過
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' }, 
-        body: JSON.stringify({
-          action: 'publishSession', // 🚩 指向我們剛剛加進 GAS 的動作
-          sessionData: {
-            sessionId: 'SID-' + Date.now(),
-            date: new Date().toLocaleDateString('zh-TW'),
-            topic: newSession.value.topic,
-            category: newSession.value.category,
-            points: newSession.value.pointsRaw.split('\n').filter(p => p.trim()),
-            quizMode: newSession.value.quizMode,
-            student_id: userConfig.student_id
-          }
-        })
-      });
-
+    // 1. 🚀 先叫 Vercel 後端幫忙出題 (純 AI 運算)
+    const response = await $fetch('/api/sessions', {
+      method: 'POST',
+      body: {
+        action: 'generateQuizOnly', // 💡 改用純 AI 模式
+        userConfig: { gemini_key: auth.gemini_key },
+        sessionData: {
+          topic: newSession.value.topic,
+          points: newSession.value.pointsRaw.split('\n').filter(p => p.trim()),
+          quizMode: newSession.value.quizMode,
+          quizCount: newSession.value.quizCount || 10
+        }
+      }
+    });
+console.log("response=",response);
+console.log("response.quizGenerated=",response.quizGenerated);
+console.log("auth=",auth);
 if (response.success) {
   const newSid = 'SID-' + Date.now();
       const pointsArray = newSession.value.pointsRaw.split('\n').filter(p => p.trim());
@@ -1030,19 +1044,20 @@ if (response.success) {
       if (!gasUrl) throw new Error("找不到 GAS 連結，請先前往設定頁面配置");
 
     const payload = {
-      action: 'append_session',
+      action: 'publishSession',
       sheetName: 'Sessions',
       data: {
         sessionId: newSid,
         date: new Date().toLocaleDateString('en-CA'),
         topic: newSession.value.topic,
         category: newSession.value.category,
-        points: JSON.stringify(pointsArray), // E 欄
-        quizTitle: '隨堂挑戰',                // F 欄
-        quizMode: newSession.value.quizMode, // G 欄
-        quizJSON: JSON.stringify(response.quizGenerated), // H 欄
-        studentId: auth.student_id           // I 欄
-      }
+        points: JSON.stringify(newSession.value.pointsRaw.split('\n').filter(p => p.trim())), 
+        quizTitle: '隨堂挑戰',
+        quizMode: newSession.value.quizMode,
+        student_id: auth.student_id || auth.studentId || "" 
+      },
+  // 🚩 直接把題目放在最外層，確保 GAS 一定抓得到
+  quizGenerated: response.quizGenerated
     };
 
       // 使用 no-cors 模式發送給 Google
