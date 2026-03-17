@@ -6,13 +6,6 @@ import fs from 'fs';
 export default defineEventHandler(async (event) => {
   const config = useRuntimeConfig(event);
 
-  沒錯，就是改這段。為了讓後端能抓到你在前端設定的 Key，我們需要讓 GEMINI_KEY 優先從 body 中獲取。
-
-同時，我也建議順手把 gemini-2.5-flash 改掉，因為目前 Google 官方還沒發布這個版本（目前最強的是 2.0-flash 或 1.5-flash），寫錯版本號也會導致 API 呼叫失敗。
-
-請將該段落替換為以下代碼：
-
-JavaScript
   try {
     const body = await readBody(event);
     
