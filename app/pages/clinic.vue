@@ -970,7 +970,11 @@ const handleStartDiagnosis = async (force = false) => {
           user: q.user_answer,
           correct: q.correct_answer
         })),
-        sheetId: auth.sheet_id
+        sheetId: auth.sheet_id,
+        // 🚩 關鍵修正：把 API Key 從 auth 帶給後端
+        userConfig: {
+          gemini_key: auth.gemini_key
+        }
       }
     }).catch(err => {
       // 🚩 這裡最關鍵：如果網路層級就報錯（例如 429 或 500），直接攔截
