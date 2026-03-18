@@ -47,7 +47,7 @@
           <div>
             <div class="flex items-center gap-2 mb-2">
               <span class="text-[10px] tracking-widest text-blue-500 font-bold uppercase">
-                {{ session.date }}
+                {{ formatDate(session.date) }}
               </span>
               <span class="px-4 py-1 bg-[#F9F8F4] rounded-full text-[10px] font-bold tracking-widest text-[#888888] uppercase">
                 {{ session.category }}
@@ -1492,6 +1492,20 @@ const showAlert = (title, message, type = 'success') => {
   setTimeout(() => {
     alertConfig.value.show = false;
   }, 3000);
+};
+
+const formatDate = (dateStr) => {
+  if (!dateStr) return '';
+  const date = new Date(dateStr);
+  
+  // 檢查是否為有效日期
+  if (isNaN(date.getTime())) return dateStr; 
+
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  
+  return `${y}/${m}/${d}`; // 輸出格式：2026/03/17
 };
 </script>
 
