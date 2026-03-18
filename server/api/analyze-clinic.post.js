@@ -46,7 +46,25 @@ export default defineEventHandler(async (event) => {
       generationConfig: { responseMimeType: "application/json" }
     });
     // 2. 核心 Prompt 指令
-    const prompt = `
+     let finalPrompt = "";
+    if (body.mode === 'greeting') {
+      // --- 模式 A：首頁自動診斷 (輕量化) ---
+      finalPrompt = `
+        你是一位溫暖且專業的鋼琴與學科導師。
+        現在學生【${studentName}】剛打開他的「快板書桌」，系統偵測到他有 ${errors.length} 個未完成的修復任務。
+        
+        【最近的錯誤重點】: ${JSON.stringify(errors.slice(0, 3))} // 只給最近 3 個，加速解析
+        
+        【任務】: 
+        請寫一句「龍蝦留言」給學生。
+        1. 語氣：像陪在旁邊的朋友，帶點幽默。
+        2. 內容：點出一個他最近常犯的具體問題（例如：嘉南大圳、或是某個英文時態），並給予鼓勵。
+        3. 限制：30 字以內，繁體中文。
+        4. 格式：{"greeting": "你的留言內容"}
+      `;
+    } else {
+
+    finalPrompt =  `
     ### CRITICAL LANGUAGE RULE ###
     1. If the subject is "英文" or "English":
        - The "question" and "options" MUST be written in 100% English. 
@@ -165,12 +183,12 @@ export default defineEventHandler(async (event) => {
      - 第三個標籤必須是「思維弱點」（例如：直覺陷阱、因果誤判）。
    - 嚴禁輸出無意義的標籤（如：思考誤區、閱讀理解、常識辨析）。
     `;
-
+    }
     console.log('--- 🚀 最終送出指令檢查 (純代碼版) ---');
-    console.log('指令字數:', prompt.length);
+    console.log('指令字數:', finalPrompt.length);
 
     // 3. 執行生成
-    const result = await model.generateContent(prompt);
+    const result = await model.generateContent(finalPrompt);
     const response = await result.response;
     const text = response.text(); 
     
