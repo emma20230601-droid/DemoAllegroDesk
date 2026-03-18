@@ -132,6 +132,7 @@ const showToast = ref(false);
 const showGeminiKey = ref(false);
 const showCloudinarySecret = ref(false);
 const userConfig = inject('userConfig'); // 🚩 注入全域設定
+const { getValidConfig } = useAuth();
 
 const updateGlobalConfig = inject('updateGlobalConfig');
 
@@ -201,29 +202,44 @@ const saveSettings = async () => {
   }
 
   // 2. ✨ 核心儲存邏輯
-  // 儲存完整 config 物件到本地
   localStorage.setItem('allegro_config', JSON.stringify(config));
   
-  // 獨立存入 user_gas_url，確保 media.vue 讀取方便
   if (config.user_gas_url) {
     localStorage.setItem('user_gas_url', config.user_gas_url.trim());
   }
 
   try {
-    // 💡 因為你拿掉了 prompt 同步，這裡不再需要呼叫 /api/config-sync 的 POST 請求
-    // 如果你未來完全不打算同步到資料庫，可以直接把 try-catch 區塊刪除
-    
-    // 模擬一個小延遲讓使用者感覺「有在儲存」
+    // 💡 新增：呼叫 GAS 進行全自動建表
+    const auth = getValidConfig();
+    const targetSheetName = auth.userName;
+    if (config.user_gas_url && targetSheetName) {
+      console.log('🚀 正在初始化雲端試算表分頁...targetSheetName=',targetSheetName);
+      
+      const response = await fetch(config.user_gas_url.trim(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' }, // GAS 習慣接收 text/plain
+        body: JSON.stringify({
+          action: 'init_sheets',
+          sheetName: targetSheetName
+        })
+      });
+
+      const result = await response.json();
+      if (result.success) {
+        console.log('✅ 雲端分頁初始化成功:', result.message);
+      } else {
+        throw new Error(result.error || '初始化失敗');
+      }
+    }
+
     await new Promise(resolve => setTimeout(resolve, 600));
-    
-    console.log('✅ 設定已儲存至本地瀏覽器');
+    console.log('✅ 設定已儲存至本地並同步至雲端');
 
   } catch (err) {
-    console.error('❌ 儲存過程發生錯誤:', err.message);
+    console.error('❌ 雲端同步失敗，但本地設定已儲存:', err.message);
+    // 這裡可以視情況決定要不要跳錯誤 Toast
   } finally {
-    // 3. 🏁 結束狀態與 UI 反饋
     isSaving.value = false;
-    
     if (updateGlobalConfig) updateGlobalConfig();
     
     isSaved.value = true;
