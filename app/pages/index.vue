@@ -5,8 +5,8 @@
       <transition name="fade">
         <div v-if="isLoading" class="global-loader-overlay">
           <div class="loader-spinner"></div>
-          <div class="loader-text font-mono tracking-[0.3em] uppercase text-blue-600/60">
-            正在偵測核心弱點...
+          <div class="loader-text font-mono tracking-[0.2em] uppercase text-blue-600/70 max-w-sm text-center px-6">
+            {{'正在偵測核心弱點...' }}
           </div>
         </div>
       </transition>
@@ -29,6 +29,48 @@
             <div class="text-[9px] text-slate-400 uppercase tracking-widest">Protocol Active</div>
           </div>
         </header>
+
+        <transition name="typewriter-fade">
+          <div v-if="!isLoading && agentMessage" class="mt-8 mb-4 group relative overflow-hidden">
+            <div class="p-6 bg-[#fdfdfd] border border-slate-200/60 rounded-[2.5rem] shadow-sm transition-all duration-500 hover:shadow-md">
+              <div class="flex items-start gap-5">
+                <div class="flex-shrink-0 w-16 h-16 rounded-full p-1 bg-white shadow-sm border border-slate-100 overflow-hidden 
+                            flex items-center justify-center group-hover:scale-105 transition-transform duration-500">
+                  
+                  <span class="text-4xl grayscale-[0.2] group-hover:grayscale-0 transition-all duration-300">
+                    🌱
+                  </span>
+
+              </div>
+        
+        <div class="flex flex-col gap-2">
+          <div class="flex items-center gap-3 mb-1 flex-wrap">
+            <span class="text-[13px] font-bold text-slate-500 tracking-[0.15em]">學習觀察筆記</span>
+            
+            <div v-if="!agentMessage.includes('任務已經達成')" class="flex items-center gap-1.5 px-2 py-0.5 bg-blue-50 rounded-full border border-blue-100">
+              <span class="w-1.5 h-1.5 bg-blue-400 rounded-full animate-pulse"></span>
+              <span class="text-[9px] text-blue-500 font-bold tracking-tighter">AI 數據分析已同步</span>
+            </div>
+            <div v-else class="flex items-center gap-1.5 px-2 py-0.5 bg-slate-100 rounded-full border border-slate-200">
+              <span class="w-1.5 h-1.5 bg-slate-400 rounded-full"></span>
+              <span class="text-[9px] text-slate-500 font-bold tracking-tighter">自主思考模式</span>
+            </div>
+
+            <span class="text-[10px] font-mono text-slate-400">
+              {{ new Date().toLocaleDateString('zh-TW').replace(/\//g, ' . ') }}
+            </span>
+            <span class="text-[10px] text-orange-500/90 border border-orange-100 px-2 py-0.5 rounded-full bg-orange-50/50">溫馨提醒</span>
+          </div>
+
+          <p class="text-xl md:text-2xl text-slate-700 font-sans font-medium leading-relaxed tracking-tight min-h-[3em]">
+            {{ displayText }}
+            <span v-if="displayText.length < agentMessage.length" class="inline-block w-1 h-5 bg-blue-400 ml-1 animate-pulse"></span>
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</transition>
 
         <div class="grid grid-cols-3 md:grid-cols-7 gap-6 mb-20">
           <div @click="activeFilter = 'All'"
@@ -143,6 +185,11 @@ const { getValidConfig } = useAuth();
 const allBugs = ref([]);
 const isLoading = ref(true); // 預設為 true，進入頁面即顯示讀取
 const activeFilter = ref('All');
+const agentMessage = ref('');
+const isAgentThinking = ref(false); // 控制 Agent 專屬的讀取狀態
+
+const displayText = ref("");  // 畫面實際顯示的字
+let typingTimer = null;
 let isFetching = false; 
 
 const getSubjectBaseColor = (subjectName) => {
@@ -164,12 +211,20 @@ const loadBugs = async () => {
   isFetching = true;
   isLoading.value = true;
   
-  try {
-    const gasUrl = localStorage.getItem('user_gas_url');
-    // 🚩 重要：對齊後端邏輯，分頁名稱加上 _Clinic
-    const targetSheetName = `${auth.userName}_Clinic`;
+  // 🚩 [新增] 24 小時快取檢查邏輯
+  const today = new Date().toDateString();
+  const lastSyncDate = localStorage.getItem('agent_last_sync_date');
+  const cachedGreeting = localStorage.getItem('agent_daily_greeting');
 
-    // 🚩 使用原生 fetch 避開 CORS 預檢請求 (Preflight)
+  // 如果今天已經抓過了，先讓畫面顯示快取內容
+  if (lastSyncDate === today && cachedGreeting) {
+    agentMessage.value = cachedGreeting;
+  }
+
+  try {
+    const targetSheetName = `${auth.userName}_Clinic`;
+    const gasUrl = localStorage.getItem('user_gas_url');
+
     const response = await fetch(gasUrl, {
       method: 'POST',
       mode: 'cors',
@@ -185,14 +240,12 @@ const loadBugs = async () => {
     const res = await response.json();
 
     if (res.success && res.data) {
-      // 🚩 資料格式轉換 (對齊 Clinic 頁面的 UI 欄位)
       allBugs.value = res.data
         .filter(r => {
           const isMastered = String(r.is_mastered || r.Mastered || '').trim().toUpperCase();
           return isMastered !== 'TRUE' && (r.title || r.Title);
         })
         .map((r, index) => ({
-          // 這裡兼容後端不同的欄位命名慣例 (大小寫或 key 名)
           id: r.id || `${auth.userName}-${index}`,
           subject: r.subject || r.Category || (targetSheetName.split('_')[0]),
           category: r.tags || r.Category || '一般',
@@ -200,11 +253,19 @@ const loadBugs = async () => {
           summary: r.summary || r['Knowledge Point'] || r.ai_explanation || '',
           date: r.date || r.Date || '2024-01-01'
         }));
+
+      // 🚩 [修改] 龍蝦發動判定：有 Bug 且 (今天還沒抓過問候 或 快取失效)
+      if (allBugs.value.length > 0) {
+        if (lastSyncDate !== today || !cachedGreeting) {
+          // 只有今天還沒同步過，才真正去騷擾 Gemini
+          triggerAgentGreeting(allBugs.value);
+        }
+      }
     } else {
       console.warn('GAS 回傳失敗:', res.error);
     }
   } catch (err) {
-    console.error('GAS 讀取異常 (可能是 CORS 或 URL 錯誤):', err);
+    console.error('GAS 讀取異常:', err);
   } finally {
     setTimeout(() => {
       isLoading.value = false;
@@ -219,6 +280,148 @@ const filteredBugs = computed(() => {
   return allBugs.value.filter(b => {
     return b.subject === activeFilter.value || targetCats.includes(b.category);
   });
+});
+
+const triggerAgentGreeting = async (bugs) => {
+  const auth = getValidConfig(); 
+  if (!auth) {
+    agentMessage.value = "系統配置未完成，請先登入設定。";
+    return;
+  }
+
+  if (!bugs || bugs.length === 0) {
+    agentMessage.value = "目前邏輯架構穩定，核心效能運作良好。";
+    return;
+  }
+
+  isAgentThinking.value = true;
+
+  try {
+    const errorBrief = bugs.slice(0, 5).map(q => q.title || '未知任務').join('、');
+
+    const result = await $fetch('/api/analyze-clinic', {
+      method: 'POST',
+      body: {
+        student_id: auth.student_id,
+        studentName: auth.userName,
+        subject: activeFilter.value === 'All' ? '全學科' : activeFilter.value,
+        errors: errorBrief,
+        mode: 'greeting',
+        userConfig: { gemini_key: auth.gemini_key }
+      }
+    }).catch(err => {
+      return { success: false, message: err.data?.message || err.message };
+    });
+
+    // ❌ 錯誤與 429 額度攔截
+    if (!result || result.success === false) {
+      const errorMsg = result?.message || '';
+      if (errorMsg.includes('429') || errorMsg.includes('quota')) {
+
+        // 🚩 這裡要讓使用者知道：AI 是因為沒體力去「看資料」了
+        const quotaMessage = "今天的數據分析任務已經圓滿達成！接下來的時間，是屬於你自己的思考派對。相信你的判斷，直接出發去解決下一個難題吧！";
+        console.log("quotaMessage=",quotaMessage);
+        
+        agentMessage.value = quotaMessage;
+        console.log("agentMessage.value=",agentMessage.value);
+        updateLocalAndCloudGreeting(quotaMessage); // 🚩 即使是錯誤，也鎖定今日問候
+        return;
+      }
+      throw new Error(errorMsg || 'AGENT_GREETING_FAILED');
+    }
+
+    // ✅ 5. 成功獲取龍蝦評價
+    if (result.greeting) {
+      // 🚩 核心動作：更新畫面、鎖定本地日期、同步雲端
+      updateLocalAndCloudGreeting(result.greeting);
+    }
+
+  } catch (e) {
+    console.warn("Agent 留言生成失敗:", e);
+    const fallbackMsg = "準備好修復今天的邏輯漏洞了嗎？我們出發吧！";
+    updateLocalAndCloudGreeting(fallbackMsg);
+  } finally {
+    isAgentThinking.value = false;
+    setTimeout(() => {
+      isLoading.value = false; 
+    }, 500);
+  }
+};
+
+// --- 🚩 封裝後的同步工具函數 ---
+const updateLocalAndCloudGreeting = (msg) => {
+  const today = new Date().toDateString();
+  
+  // 1. 更新前端畫面
+  agentMessage.value = msg;
+  
+  // 2. 鎖定本地快取 (24小時守衛)
+  localStorage.setItem('agent_daily_greeting', msg);
+  localStorage.setItem('agent_last_sync_date', today);
+  
+  // 3. 同步回寫到 Google Sheet _Config (路徑 B)
+  saveAgentLogToSheet(msg);
+};
+
+// 在 saveAgentLogToSheet 或是專門的更新函數中
+const saveAgentLogToSheet = async (newGreeting) => {
+  const auth = getValidConfig();
+  const gasUrl = localStorage.getItem('user_gas_url');
+  const targetSheetName = `${auth.userName}_Config`;
+  if (!gasUrl) return;
+
+  try {
+    const res = await $fetch(gasUrl, {
+      method: 'POST',
+      // 🚩 加入這行確保 GAS 能解析 JSON
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }, 
+      body: JSON.stringify({ // 🚩 有些情況改用 JSON.stringify 會更穩
+        action: 'update_config',
+        sheetName: targetSheetName,
+        key: 'daily_greeting',
+        value: newGreeting
+      })
+    });
+    console.log("龍蝦記憶同步成功:", res);
+  } catch (err) {
+    console.error("寫入 Config 失敗:", err);
+  }
+};
+  
+// 🚩 優化後的打字函式
+const startTyping = (text) => {
+  if (!text) return;
+  // 清除舊的定時器
+  if (typingTimer) clearInterval(typingTimer);
+  
+  displayText.value = ""; 
+  let i = 0;
+  
+  // 稍微延遲一下，等 Transition 動畫跑完再開始打字，視覺最順
+  setTimeout(() => {
+    typingTimer = setInterval(() => {
+      if (i < text.length) {
+        displayText.value += text.charAt(i);
+        i++;
+      } else {
+        clearInterval(typingTimer);
+      }
+    }, 40); // 速度調快一點點，讀起來比較順
+  }, 600); 
+};
+
+// 🚩 關鍵修正：監聽 isLoading。當轉圈圈結束時，才觸發打字
+watch(isLoading, (newVal) => {
+  if (newVal === false && agentMessage.value) {
+    startTyping(agentMessage.value);
+  }
+});
+
+// 如果 agentMessage 在 isLoading 已經是 false 的情況下變動（例如切換分類），也要觸發
+watch(agentMessage, (newVal) => {
+  if (!isLoading.value && newVal) {
+    startTyping(newVal);
+  }
 });
 
 // 🌟 分類切換的載入感
@@ -251,10 +454,10 @@ watch(() => userConfig?.student_id, (newId) => {
 }, { immediate: true });
 
 </script>
-
 <style scoped>
-/* 列表過渡動畫 */
-.list-enter-active, .list-leave-active {
+/* 1. 列表過渡動畫 (用於 Bug 卡片列表的增減) */
+.list-enter-active, 
+.list-leave-active {
   transition: all 0.5s ease;
 }
 .list-enter-from {
@@ -266,12 +469,15 @@ watch(() => userConfig?.student_id, (newId) => {
   transform: translateX(-30px);
 }
 
-/* 🌟 全域載入遮罩樣式 */
+/* 2. 全域載入遮罩樣式 (玻璃磨砂感) */
 .global-loader-overlay {
-  position: fixed; /* 改為 fixed 以覆蓋全域 */
-  top: 0; left: 0; right: 0; bottom: 0;
+  position: fixed;
+  top: 0; 
+  left: 0; 
+  right: 0; 
+  bottom: 0;
   background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(8px); /* 磨砂玻璃效果 */
+  backdrop-filter: blur(8px);
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -298,13 +504,25 @@ watch(() => userConfig?.student_id, (newId) => {
   font-size: 0.75rem;
   letter-spacing: 0.4em;
   color: #64748b;
+  text-transform: uppercase;
 }
 
-/* 漸變動畫 */
-.fade-enter-active, .fade-leave-active {
+/* 3. 基礎淡入動畫 (用於 Loader 顯示隱藏) */
+.fade-enter-active, 
+.fade-leave-active {
   transition: opacity 0.3s ease;
 }
-.fade-enter-from, .fade-leave-to {
+.fade-enter-from, 
+.fade-leave-to {
   opacity: 0;
+}
+
+/* 4. 碼農媽媽「手帳卡片」登場動畫 (緩緩上浮) */
+.typewriter-fade-enter-active {
+  transition: all 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.typewriter-fade-enter-from {
+  opacity: 0;
+  transform: translateY(20px);
 }
 </style>
