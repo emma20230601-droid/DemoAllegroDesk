@@ -451,7 +451,7 @@
 import { inject, ref, computed, onMounted, watch } from 'vue';
 import { useAuth } from '~/composables/useAuth'
 const loading = ref(false);
-const subjectConfigs = inject('subjectConfigs'); // ✨ 補上這行，從 app.vue 注入配置
+const subjectConfigs = inject('subjectConfigs'); 
 const userConfig = inject('userConfig'); 
 const completedTopics = ref(new Set());
 const showToast = inject('showToast'); 
@@ -463,19 +463,23 @@ const sessionIterations = ref({});
 const activeQuiz = ref(null);
 const currentIdx = ref(0);
 const quizResults = ref([]); 
-const localRefreshTracker = ref({});// 用來紀錄「本次開啟網頁後」額外新增的次數
+const localRefreshTracker = ref({});
 const uploadStatus = ref('正在翻閱學習日誌...'); // 預設進入文字
-const isDeleting = ref(false); // 新增刪除狀態，用於觸發全域遮罩
+const isDeleting = ref(false); 
 const cameraInput = ref(null);
 const isAnalyzing = ref(false);
 const isSyncing = ref(false);
 const { getValidConfig } = useAuth();
+const selectedAnswerIndex = ref(null);
+const lastSelectedIndex = ref(null); 
+const selectedSubject = ref('國文');
+const filteredSessions = ref([]);
 
 const newSession = ref({
   topic: '',
   pointsRaw: '',
-  category: '', // 先留空，由 watch 處理
-  quizMode: 'concept', // 預設值建議改為 concept，對應妳 HTML 的 <option value="concept">
+  category: '', 
+  quizMode: 'concept', 
   quizCount: 10 // 👈 預設為 10 題
 });
 
@@ -489,14 +493,14 @@ const handlePhotoUpload = async (event) => {
   // 1.🛡️ 門禁守衛：直接取得驗證過的設定
   const auth = getValidConfig();
   if (!auth) {
-    event.target.value = ''; // 沒卡就清空選擇，防止卡死
+    event.target.value = ''; 
     return;
   }
 
   const files = Array.from(event.target.files);
   if (files.length === 0) return;
 
-  // 2. 通過檢查，直接從 auth 拿到所有設定（不需要再從 localStorage 慢慢抓）
+  // 2. 通過檢查，直接從 auth 拿到所有設定
   const userConfig = auth; 
 
   isAnalyzing.value = true;
@@ -536,12 +540,12 @@ const handlePhotoUpload = async (event) => {
     // 執行壓縮
     const imagesArray = await Promise.all(files.map(file => compressImage(file)));
 
-    // 3. 送往 API (body 裡的 userConfig 直接用剛才門禁拿到的 auth)
+    // 3. 送往 API
     const response = await $fetch('/api/sessions', {
       method: 'POST',
       body: {
         action: 'analyzeVision',
-        userConfig: auth, // 👈 直接把完整的 auth 送過去，裡面包含 key 和 sheetId
+        userConfig: auth, 
         subjectConfigs: subjectConfigs, 
         sessionData: {
           category: newSession.value.category 
@@ -582,7 +586,7 @@ const handlePhotoUpload = async (event) => {
   } finally {
     isAnalyzing.value = false;
     event.target.value = ''; 
-    uploadStatus.value = ''; // 清空
+    uploadStatus.value = ''; 
   }
 };
 
@@ -591,7 +595,7 @@ const currentQuestion = computed(() => activeQuiz.value?.questions[currentIdx.va
 const quizProgress = computed(() => (totalQuestions.value > 0 ? (currentIdx.value / totalQuestions.value) * 100 : 0));
 const quizScores = ref({}); 
 
-// --- 功能：抓取 Google Sheets 資料 (增強版：增加 F5 自我修復) ---
+// --- 功能：抓取 Google Sheets 資料 ---
 const fetchSessions = async () => {
   // 1. 💡 改用門禁工具，確保資料來源統一且安全
   const { getValidConfig } = useAuth();
@@ -614,12 +618,11 @@ const fetchSessions = async () => {
     return;
   }
 
-  const gasUrl = localStorage.getItem('user_gas_url'); // 💡 取得 GAS 網址
+  const gasUrl = localStorage.getItem('user_gas_url'); 
 
   loading.value = true;
 
   try {
-    // 💡 替代原本的 $fetch，改由 GAS 抓取資料以避開 Vercel 的 400 錯誤
     const fetchFromGAS = async (sheetName) => {
       if (!gasUrl) throw new Error("缺少 GAS URL 設定");
       const response = await fetch(gasUrl, {
@@ -633,17 +636,16 @@ const fetchSessions = async () => {
       return res.success ? res.data : [];
     };
 
-    // 4. ✨ 核心修改點：將 $fetch 換成 fetchFromGAS，但保留對應的變數名稱
+    // 4. 換成 fetchFromGAS
     const [sessionResponse, resultsResponse] = await Promise.all([
       fetchFromGAS('Sessions'),
       fetchFromGAS('QuizResults')
     ]);
 
-    // 保持原本的解構邏輯，確保相容性
     const rawRows = Array.isArray(sessionResponse) ? sessionResponse : (sessionResponse.data || []);
     const rawResults = Array.isArray(resultsResponse) ? resultsResponse : (resultsResponse.data || []);
 
-    // --- 1. 回數統一計算邏輯 (維持原設計) ---
+    // --- 1. 回數統一計算邏輯---
     const sessionIterationMap = {};
     rawResults.forEach(res => {
       const sid = String(res.sessionId || res.SessionID || '').trim();
@@ -652,16 +654,15 @@ const fetchSessions = async () => {
     });
 
     sessionIterations.value = sessionIterationMap;
-    console.log('單一測驗次數對照表:', sessionIterationMap);
 
-    // --- 2. 過濾邏輯 (維持原設計) ---
+    // --- 2. 過濾邏輯 ---
     const myId = (currentStudentId || '').trim().toLowerCase();
     const processedRows = rawRows.filter(s => {
       const rowSid = String(s.studentId || s.student_id || s.StudentId || '').trim().toLowerCase();
       return rowSid === myId;
     });
 
-    // --- 3. 成績處理 (維持原設計) ---
+    // --- 3. 成績處理 ---
     const completedSet = new Set();
     const scoresMap = {};
     rawResults.forEach(res => {
@@ -675,7 +676,7 @@ const fetchSessions = async () => {
     completedTopics.value = completedSet;
     quizScores.value = scoresMap;
 
-    // --- 4. 資料轉化 (維持原設計，包含題數判斷) ---
+    // --- 4. 資料轉化 ---
     if (processedRows.length >= 0) {
       sessions.value = processedRows.map(s => {
         const student_id_val = s.studentId || s.student_id || '';
@@ -740,7 +741,7 @@ const fetchSessions = async () => {
 // --- 功能：開啟測驗 ---
 const openQuiz = async (session, isRefresh = false) => {
   try {
-    // 1. 💡 AI 刷新邏輯區塊
+    // 1. AI 刷新邏輯區塊
     if (isRefresh || !session.QuizJSON || String(session.QuizJSON).trim() === "" || String(session.QuizJSON) === "undefined") {
       
       if (!isRefresh && (!session.QuizJSON || String(session.QuizJSON).trim() === "")) {
@@ -780,17 +781,17 @@ const openQuiz = async (session, isRefresh = false) => {
         ? response.quizGenerated 
         : JSON.stringify(response.quizGenerated);
 
-      // 2. ✨ 重點：出完題立刻叫 GAS 存回試算表
+      // 2. 出完題立刻叫 GAS 存回試算表
       const gasUrl = localStorage.getItem('user_gas_url');
       if (gasUrl) {
         await fetch(gasUrl, {
           method: 'POST',
           mode: 'no-cors',
           body: JSON.stringify({
-            action: 'update_session', // 我們剛剛寫好的更新功能
+            action: 'update_session', 
             sessionId: session.sessionId,
             updates: {
-              quizJSON: newQuizJSON, // 假設你在 GAS 有對應這個欄位
+              quizJSON: newQuizJSON, 
               quizMode: session.newDiff || session.quizMode
             }
           })
@@ -810,9 +811,8 @@ const openQuiz = async (session, isRefresh = false) => {
       }
     }
 
-    // --- ⬇️ 2. 解析與載入邏輯 (這是原本代碼的下半部) ⬇️ ---
+    // --- ⬇️ 2. 解析與載入邏輯 ⬇️ ---
     let rawData = session.QuizJSON;
-    console.log("rawData=", rawData);
 
     let parsedData = rawData;
     if (typeof rawData === 'string') {
@@ -846,7 +846,7 @@ const openQuiz = async (session, isRefresh = false) => {
       }];
     }
 
-    // 💡 修正點：確保 activeQuiz 確實被賦予處理後的陣列
+
     activeQuiz.value = {
       sessionId: session.sessionId,
       topic: session.topic || "隨堂測驗",
@@ -856,7 +856,7 @@ const openQuiz = async (session, isRefresh = false) => {
     
     currentIdx.value = 0;
     quizResults.value = [];
-    console.log("[Quiz] 成功載入題目數:", questionsArray.length);
+
 
   } catch (err) {
     console.error("Quiz 系統崩潰:", err);
@@ -905,7 +905,6 @@ const handleAnswer = async (selected) => {
     
   } else {
     // --- 情況 B：最後一題，直接進入結算流程 ---
-    // 💡 我們可以只留 500ms 讓用戶看最後一題的對錯，然後馬上轉圈
     setTimeout(async () => {
       showFeedback.value = false;
       
@@ -913,7 +912,7 @@ const handleAnswer = async (selected) => {
       if (!activeQuiz.value) return;
       const quizSnapshot = { ...activeQuiz.value };
 
-      // 🔄 顯示全域轉圈 (你可以根據你的 UI 變數調整)
+      // 🔄 顯示全域轉圈 
       isAnalyzing.value = true; 
       uploadStatus.value = '正在儲存最終成績...';
 
@@ -932,18 +931,18 @@ const handleAnswer = async (selected) => {
       } finally {
         // ✨ 重置所有狀態
         isProcessing.value = false;
-        isAnalyzing.value = false; // 關閉轉圈
+        isAnalyzing.value = false;
         uploadStatus.value = '';
         
         currentIdx.value = 0; 
         activeQuiz.value = null; 
         quizResults.value = []; 
       }
-    }, 600); // 縮短至 0.6 秒，體感會流暢很多
+    }, 600); 
   }
 };
 // --- 功能：完成並上傳成績 ---
-// 傳入 snapshot 作為參數
+
 const finishAndSubmitQuiz = async (snapshot) => {
   const quizData = snapshot || activeQuiz.value;
   if (!quizData) return;
@@ -959,7 +958,6 @@ const finishAndSubmitQuiz = async (snapshot) => {
   if (showToast) showToast('測驗結束，正在同步成績...');
 
   try {
-    // 💡 改為呼叫 GAS，欄位完全對齊你原本的 .js 檔案
     await fetch(gasUrl, {
       method: 'POST',
       mode: 'no-cors',
@@ -1017,11 +1015,11 @@ const saveNewSession = async () => {
   uploadStatus.value = '正在處理 AI 命題與同步...';
   
   try {
-    // 1. 🚀 先叫 Vercel 後端幫忙出題 (純 AI 運算)
+    // 1. 後端幫忙出題 (純 AI 運算)
     const response = await $fetch('/api/sessions', {
       method: 'POST',
       body: {
-        action: 'generateQuizOnly', // 💡 改用純 AI 模式
+        action: 'generateQuizOnly', 
         userConfig: { gemini_key: auth.gemini_key },
         sessionData: {
           topic: newSession.value.topic,
@@ -1031,15 +1029,12 @@ const saveNewSession = async () => {
         }
       }
     });
-console.log("response=",response);
-console.log("response.quizGenerated=",response.quizGenerated);
-console.log("auth=",auth);
+
 if (response.success) {
   const newSid = 'SID-' + Date.now();
       const pointsArray = newSession.value.pointsRaw.split('\n').filter(p => p.trim());
       
-      // 2. 💡 關鍵：直接呼叫 GAS 存入 Google Sheets
-      // 我們不經過 Vercel，直接把資料丟進 GAS
+      // 2.  GAS 存入 Google Sheets
       const gasUrl = localStorage.getItem('user_gas_url'); 
       if (!gasUrl) throw new Error("找不到 GAS 連結，請先前往設定頁面配置");
 
@@ -1056,7 +1051,7 @@ if (response.success) {
         quizMode: newSession.value.quizMode,
         student_id: auth.student_id || auth.studentId || "" 
       },
-  // 🚩 直接把題目放在最外層，確保 GAS 一定抓得到
+
   quizGenerated: response.quizGenerated
     };
 
@@ -1067,19 +1062,18 @@ if (response.success) {
         body: JSON.stringify(payload)
       });
 
-      // 💡 關鍵優化：給 Google Sheets 一點點時間 (例如 800ms) 處理寫入
-      // 否則接下來的 fetchSessions() 可能會抓不到最新那筆
+
       await new Promise(resolve => setTimeout(resolve, 800));
 
-      // 1. ✨ 先執行刷新
+      // 1. 執行刷新
       await fetchSessions();
       
-      // 2. ✨ 從刷新後的列表中找出剛才那筆
-      // 這裡直接比對我們剛生成的 newSid
+      // 2. 從刷新後的列表中找出剛才那筆
+
       const latestSessionFromSheet = sessions.value.find(s => s.sessionId === newSid);
       const finalSessionId = latestSessionFromSheet?.sessionId || newSid;
       
-      // 3. 處理題目數據 (維持原本邏輯)
+      // 3. 處理題目數據
       let rawQuestions = response.quizGenerated || [];
       const questionsArray = (Array.isArray(rawQuestions) ? rawQuestions : [rawQuestions]).map(q => ({
         q: q.q || q.question || "",
@@ -1091,7 +1085,7 @@ if (response.success) {
       // 4. 開啟測驗介面
       if (questionsArray.length > 0 && questionsArray[0].q !== "") {
         activeQuiz.value = {
-          sessionId: finalSessionId, // ✨ 使用從列表同步後的正式 ID
+          sessionId: finalSessionId, 
           category: newSession.value.category,
           topic: newSession.value.topic,
           questions: questionsArray,
@@ -1100,8 +1094,7 @@ if (response.success) {
         
         currentIdx.value = 0;
         quizResults.value = [];
-        
-        console.log("[Quiz] 發布成功並自動加載題目，ID:", finalSessionId);
+
       } else {
         console.warn("後端未回傳有效題目內容", response);
       }
@@ -1117,15 +1110,14 @@ if (response.success) {
         topic: '', 
         pointsRaw: '', 
         category: lastCategory, 
-        quizMode: 'concept' // ✨ 重置回預設值
+        quizMode: 'concept' 
       };
     }else {
-      // --- ✨ 修改處 3：API 回傳失敗 ---
+      // --- API 回傳失敗 ---
       showAlert('發布失敗', response.error || '請檢查網路連線後重試', 'error');
     }
   } catch (e) {
     console.error("Fetch Error:", e);
-    // --- ✨ 修改處 4：連線噴錯 ---
     showAlert('網路或系統錯誤', '目前無法連線至伺服器', 'error');
   } finally {
     isSaving.value = false;
@@ -1134,12 +1126,6 @@ if (response.success) {
   }
 };
 
-// 在 <script setup> 中新增紀錄學生選了什麼的變數
-const selectedAnswerIndex = ref(null);
-
-// 修改 checkAnswer 讓它紀錄學生的選擇
-// 在 <script setup> 內找個位置加上這行
-const lastSelectedIndex = ref(null); 
 
 const checkAnswer = async (idx) => {
   lastSelectedIndex.value = idx; // ✨ 新增：紀錄學生點選的 index
@@ -1155,12 +1141,10 @@ const saveQuizResult = async (snapshot) => {
   const auth = getValidConfig(); 
   if (!auth) {
     console.error("[系統] 門禁缺失，無法自動存檔");
-    return; // 這裡會自動跳出你設計的漂亮寶藍色彈窗
+    return; 
   }
 
-
   // 📦 第二道保險：資料檢查 (確認測驗內容還在)
-  // 💡 這裡一定要留！解決傳入參數或全域變數 undefined 的問題
   const quizData = snapshot || activeQuiz.value;
   
   if (!quizData || !quizData.topic) {
@@ -1168,7 +1152,6 @@ const saveQuizResult = async (snapshot) => {
     return;
   }
 
-  
   const gasUrl = localStorage.getItem('user_gas_url');
   if (!gasUrl) return;
 
@@ -1203,8 +1186,8 @@ const saveQuizResult = async (snapshot) => {
       date: formattedDate,
       scan_date: scanTimestamp,
       category: currentCategory, 
-      title: `${currentTopic} - (隨堂測驗)`, // 對應 E 欄
-      question_key: `${currentTopic}(${modeLabel}) - 第 ${idx + 1} 題`, // 對應 F 欄
+      title: `${currentTopic} - (隨堂測驗)`, 
+      question_key: `${currentTopic}(${modeLabel}) - 第 ${idx + 1} 題`, 
       correct_answer: getAnswerLetter(res.correct),
       user_answer: getAnswerLetter(res.selected),
       knowledge_point: fullQuestionDetail,
@@ -1215,7 +1198,6 @@ const saveQuizResult = async (snapshot) => {
   });
 
   try {
-    // 💡 捨棄 /api/assignments，直接找 GAS
     await fetch(gasUrl, {
       method: 'POST',
       mode: 'no-cors',
@@ -1225,20 +1207,12 @@ const saveQuizResult = async (snapshot) => {
         data: updates
       })
     });
-   console.log("✅ 測驗結果已透過 GAS 同步=", auth.name);
   } catch (e) {
     console.error("同步失敗:", e);
   }
 };
 
-// 1. 宣告目前選中的科目 (預設為樂理)
-const selectedSubject = ref('國文');
 
-
-
-const filteredSessions = ref([]);
-
-// 建立一個更新資料的 function
 const updateFilteredData = () => {
   if (!sessions.value) {
     filteredSessions.value = [];
@@ -1256,7 +1230,7 @@ const updateFilteredData = () => {
 
 // 3. 監聽科目切換，自動更新新增表單的預設分類
 watch(selectedSubject, async (newSub) => {
-  // ✨ 新增這行：如果正在刪除或儲存中，就不要執行切換科目的 Loading 邏輯
+
   if (isDeleting.value || isSaving.value) return;
 
   // 1. 先清空目前的列表 (選擇性)，並立刻啟動轉圈圈
@@ -1269,25 +1243,23 @@ watch(selectedSubject, async (newSub) => {
     newSession.value.category = cats[0];
   }
 
-  // 3. ✨ 關鍵延遲：給瀏覽器大約 50-100ms 的時間去渲染「轉圈圈」的畫面
-  // 這樣使用者會先看到訊息，感覺系統在「準備中」
+  // 3. 關鍵延遲：給瀏覽器大約 50-100ms 的時間去渲染「轉圈圈」的畫面
   await new Promise(resolve => setTimeout(resolve, 100));
 
-  // 4. 正式更新資料 (這時候畫面已經被遮罩擋住了)
+  // 4. 正式更新資料
   updateFilteredData();
 
-  // 5. 額外的小延遲 (讓轉圈圈不要閃現太快，保持質感)
+  // 5. 額外的小延遲
   await new Promise(resolve => setTimeout(resolve, 400)); 
 
   loading.value = false;
-}, { immediate: false }); // 初始掛載由 onMounted 處理
+}, { immediate: false }); 
 
-// --- 監聽與掛載 (仿照成功頁面的強健模式) ---
+// --- 監聽與掛載 ---
 watch(
   () => userConfig?.sheet_id, 
   async (newId) => {
     if (newId && newId !== 'undefined') {
-      console.log("[System] Config change detected, fetching...");
       await fetchSessions();
     }
   }
@@ -1298,8 +1270,8 @@ onMounted(async () => {
   uploadStatus.value = "正在翻閱學習日誌...";
 
   try {
-    await fetchSessions(); // 確保這內部會更新 sessions.value
-    updateFilteredData();  // 資料抓完後，手動觸發一次過濾更新
+    await fetchSessions(); 
+    updateFilteredData();  
   } finally {
     setTimeout(() => {
       loading.value = false;
@@ -1308,7 +1280,6 @@ onMounted(async () => {
 });
 
 
-// 保持與 theory.vue 一致的 ID 處理邏輯
 const getPaperId = (id) => {
   if (!id) return '';
   const parts = String(id).split('-');
@@ -1340,20 +1311,16 @@ const startDeleteLogic = async (session) => {
   uploadStatus.value = '正在移除紀錄...';
 
   try {
-    // 💡 改為直接連向 GAS
     const response = await fetch(gasUrl, {
       method: 'POST',
-      mode: 'no-cors', // 保持一致
+      mode: 'no-cors', 
       body: JSON.stringify({
         action: 'delete_session',
         sessionId: session.sessionId,
-        sheetName: 'Sessions' // 告訴 GAS 要去哪張表刪除
+        sheetName: 'Sessions' 
       })
     });
 
-    // 💡 註：因為 no-cors 無法取得 response.json()，
-    // 我們假設請求發出即成功，或者你可以把 mode 改回 cors (如果 GAS 有設定的話)
-    // 這裡我們優化體驗，直接在前端移除
     const idx = sessions.value.findIndex(s => s.sessionId === session.sessionId);
     if (idx !== -1) {
       sessions.value.splice(idx, 1);
@@ -1374,15 +1341,15 @@ const startDeleteLogic = async (session) => {
 // --- 2. Modal 控制 ---
 const deleteModal = ref({ show: false, session: null });
 
-// 步驟 A：開啟確認視窗 (這要綁定在你的垃圾桶按鈕 @click="confirmDelete(session)")
+// 步驟 A：開啟確認視窗
 const confirmDelete = (session) => {
   deleteModal.value = { show: true, session };
 };
 
-// 步驟 B：真正執行刪除 (這綁定在 Modal 的「確定」按鈕)
+// 步驟 B：真正執行刪除
 const executeDelete = async () => {
   const session = deleteModal.value.session;
-  deleteModal.value.show = false; // 立即關閉視窗
+  deleteModal.value.show = false; 
   
   if (!session) return;
   
@@ -1394,14 +1361,13 @@ const executeDelete = async () => {
 // 處理標題編輯
 const onFieldBlur = async (event, session, field) => {
   const newValue = event.target.innerText.trim();
-  if (newValue === session[field]) return; // 沒變就不動
+  if (newValue === session[field]) return; 
 
   const oldValue = session[field];
-  session[field] = newValue; // 先更新 UI
+  session[field] = newValue; 
 
   try {
-    await updateSessionInDB(session); // 呼叫你更新 Firebase/資料庫的函式
-    // 可以加一個小小的 Toast 提示「儲存成功」
+    await updateSessionInDB(session);
   } catch (error) {
     session[field] = oldValue; // 失敗了就復原
     showAlert('儲存失敗', '無法同步至雲端，請檢查網路連線', 'error');
@@ -1455,10 +1421,6 @@ const updateSessionInDB = async (session) => {
       })
     });
 
-    // 這裡印一下 Log，確認前端有發出這筆資料
-    console.log("已發送更新請求:", session.sessionId, session.topic);
-
-    // 🌟 因為 no-cors 無法得知成功與否，我們假設只要沒噴 Error 就是發送成功
     showAlert(
       '雲端同步完成', 
       `「${session.topic || '內容'}」已成功更新`, 
@@ -1471,7 +1433,7 @@ const updateSessionInDB = async (session) => {
   }
 };
 
-// 建立與 theory.vue 一致的配置物件
+
 const alertConfig = ref({
   show: false,
   type: 'success',
@@ -1479,7 +1441,7 @@ const alertConfig = ref({
   message: ''
 });
 
-// 封裝一個彈窗函式
+
 const showAlert = (title, message, type = 'success') => {
   alertConfig.value = {
     show: true,
@@ -1488,7 +1450,7 @@ const showAlert = (title, message, type = 'success') => {
     type
   };
   
-  // 3秒後自動關閉
+
   setTimeout(() => {
     alertConfig.value.show = false;
   }, 3000);
@@ -1534,7 +1496,6 @@ const formatDate = (dateStr) => {
 }
 .fade-enter-from, .fade-leave-to {
   opacity: 0;
-  /* 只有在背景遮罩時才會觸發 blur */
   backdrop-filter: blur(0px);
 }
 
@@ -1546,32 +1507,25 @@ const formatDate = (dateStr) => {
   animation: spin 1s linear infinite;
 }
 
-/* --- ✨ 針對身分識別新增的視覺強化 (不影響原本佈局) --- */
-
-/* 個人筆記：使用溫暖的琥珀色調與淡淡的紙張陰影 */
 .border-amber-200 {
-  border-color: #FDE68A !important; /* 琥珀色邊框 */
-  background-color: rgba(255, 251, 235, 0.4); /* 極淺黃背景 */
-  box-shadow: 0 10px 25px -5px rgba(245, 158, 11, 0.08); /* 溫暖的陰影 */
+  border-color: #FDE68A !important; 
+  background-color: rgba(255, 251, 235, 0.4); 
+  box-shadow: 0 10px 25px -5px rgba(245, 158, 11, 0.08); 
 }
 
-/* 官方紀錄：保持專業、冷調的設計 */
 .border-[#EEEBE5] {
   box-shadow: 0 10px 20px -10px rgba(0, 0, 0, 0.03);
 }
 
-/* 強化標籤的文字可讀性 */
 .tracking-widest {
   letter-spacing: 0.2em !important;
 }
 
-/* 列表項目的微交互：滑過時輕微上浮 */
 .hover\:shadow-md:hover {
   transform: translateY(-2px);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* 滾動條美化 (針對編輯器內長文本) */
 textarea::-webkit-scrollbar {
   width: 4px;
 }
@@ -1581,7 +1535,6 @@ textarea::-webkit-scrollbar-thumb {
 }
 
 
-/* 讓過場更滑順的縮放效果 */
 .fade-in-scale-enter-active, .fade-in-scale-leave-active {
   transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
@@ -1606,7 +1559,7 @@ textarea::-webkit-scrollbar-thumb {
 .modal-enter-active .relative { transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); }
 .modal-enter-from .relative { transform: scale(0.9) translateY(20px); }
 
-/* 這是讓通知「從上方滑入」並帶有「縮放感」的關鍵動畫 */
+
 .notification-enter-active,
 .notification-leave-active {
   transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
@@ -1614,7 +1567,7 @@ textarea::-webkit-scrollbar-thumb {
 
 .notification-enter-from {
   opacity: 0;
-  transform: translate(-50%, -40px) scale(0.9); /* 從更上面滑下來 */
+  transform: translate(-50%, -40px) scale(0.9); 
 }
 
 .notification-leave-to {
@@ -1622,7 +1575,7 @@ textarea::-webkit-scrollbar-thumb {
   transform: translate(-50%, -20px) scale(0.95);
 }
 
-/* 🌟 統一全域遮罩樣式 */
+
 .global-loader-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
