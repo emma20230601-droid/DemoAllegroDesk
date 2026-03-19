@@ -153,7 +153,7 @@
                             class="px-8 py-2.5 bg-white border border-slate-100 rounded-full text-[11px] font-bold text-slate-600 shadow-sm hover:shadow-md hover:bg-slate-900 hover:text-white hover:border-slate-900 transition-all active:scale-95 uppercase tracking-widest">
                       Start Calibration
                     </button>
-                    <span class="text-[10px] font-mono text-slate-300">DETECTED: {{ bug.date }}</span>
+                    <span class="text-[10px] font-mono text-slate-300">DETECTED: {{ formatDate(bug.date) }}</span>
                   </div>
                 </div>
 
@@ -386,6 +386,20 @@ const startTyping = (text) => {
       }
     }, 40); 
   }, 600); 
+};
+
+const formatDate = (dateStr) => {
+  if (!dateStr) return '';
+  const date = new Date(dateStr);
+  
+  // 檢查是否為有效日期
+  if (isNaN(date.getTime())) return dateStr; 
+
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  
+  return `${y}/${m}/${d}`; // 輸出格式：2026/03/17
 };
 
 watch(isLoading, (newVal) => {
