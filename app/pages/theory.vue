@@ -287,7 +287,7 @@
       </div>
 
     <div class="flex justify-between items-center mt-6 px-4">
-      <span class="text-[11px] font-bold text-gray-300 uppercase tracking-widest">{{ item.date }}</span>
+      <span class="text-[11px] font-bold text-gray-300 uppercase tracking-widest">{{ formatDate(item.date) }}</span>
       <button @click="deleteItem(item.id, formatQuestionDisplay(item.question_key))" class="text-gray-200 hover:text-rose-500 transition-colors">
         <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -423,9 +423,6 @@ const prepareToCrop = (event) => {
   reader.onload = (e) => {
     rawImage.value = e.target.result;
     isCropping.value = true;
-    
-    // ✨ 關鍵修正：清空 value
-    // 這樣下次選同一張圖時，值會從「空」變成「圖」，觸發 change
     event.target.value = ''; 
   };
   reader.readAsDataURL(file);
@@ -439,15 +436,11 @@ const confirmCrop = () => {
     const croppedImage = canvas.toDataURL('image/jpeg');
     imageFiles.value.push(croppedImage);
     
-    // 🚩 關鍵：裁切完一題後，關閉裁切視窗，回到上傳分頁
+    // 裁切完一題後，關閉裁切視窗，回到上傳分頁
     isCropping.value = false;
     rawImage.value = null;
-    
-    // 可以加個小提示
-    // showNotification('success', `已暫存第 ${imageFiles.value.length} 題`);
   }
 };
-
 
 const cancelCrop = () => {
   isCropping.value = false;
@@ -508,7 +501,7 @@ const generateWrongQuestionsPDF = () => {
         .q-title { font-weight: bold; font-size: 11pt; margin-bottom: 6px; display: flex; justify-content: space-between; }
         .q-content { white-space: pre-wrap; margin-bottom: 12px; font-size: 10.5pt; color: #222; }
         
-        /* 🚩 圖片樣式優化 */
+        /* 圖片樣式優化 */
         img { 
           display: block; 
           max-width: 100%; 
@@ -576,7 +569,7 @@ const generateWrongQuestionsPDF = () => {
   }, 500);
 };
 
-// --- 核心狀態管理 (已拿掉學生列表、班級總覽) ---
+// --- 核心狀態管理---
 const subjectConfigs = inject('subjectConfigs');
 const userConfig = inject('userConfig'); 
 const selectedSubject = ref('國文'); 
@@ -592,32 +585,24 @@ const selectedCategory = ref('');
 const showOnlyWrong = ref(false); 
 const zoomedImageUrl = ref(null);
 const syncSuccess = ref(false);
+const gradingMode = ref('ai');
 
 const form = reactive({ 
   question_key: '', 
   knowledge_point: '', 
   test_date: new Date().toISOString().split('T')[0] 
 });
-const gradingMode = ref('ai');
 
-// --- 工具函式 ---
-
-/**
- * 解析複雜的 question_key 
- * 格式範例: "555... - 第 三-2-(1) 題"
- */
 const parseQuestionKey = (key) => {
   if (!key) return { big: '', small: '999', rawSmall: '999' };
 
   // 1. 匹配大題 (一, 二, 三...) 與 小題 (1, 2, 3...)
-  // 這個正則會抓取 「第」之後的 國字-數字
   const match = key.match(/第\s*([一二三四五六七八九十]+)-([\d\-\(\)]+)\s*題/);
 
   if (match) {
-    const bigTitle = match[1]; // 例如: 三
-    const smallTitle = match[2]; // 例如: 2-(1) 或 1
+    const bigTitle = match[1]; 
+    const smallTitle = match[2]; 
     
-    // 提取 smallTitle 中的第一個數字用於排序
     const firstNum = smallTitle.match(/\d+/)?.[0] || '999';
 
     return {
@@ -627,24 +612,16 @@ const parseQuestionKey = (key) => {
     };
   }
 
-  // 備援：如果格式不符，嘗試抓最後一個數字
   const fallback = key.match(/(\d+)(?!.*\d)/);
   return { big: '', small: fallback ? fallback[1] : '999', sortValue: fallback ? parseInt(fallback[1]) : 999 };
 };
 
-/**
- * 專門給 UI 顯示用的函式
- * 回傳範例: "第一大題 No. 2-(1)"
- */
 const formatQuestionDisplay = (key) => {
   const { big, small } = parseQuestionKey(key);
   if (!big) return `No. ${small}`;
   return `第${big}大題 No. ${small}`;
 };
 
-/**
- * 原有的排序函式優化 (用於 .sort())
- */
 const extractQuestionNum = (key) => {
   const { sortValue } = parseQuestionKey(key);
   return sortValue;
@@ -653,34 +630,26 @@ const extractQuestionNum = (key) => {
 const zoomImage = (url) => { zoomedImageUrl.value = url; };
 
 const checkMastery = (item) => {
-  // 1. 統一轉為字串並去除空白，空值統一為空字串 ''
   const currentAns = String(item.user_answer || '').trim().toLowerCase();
   const correctAns = String(item.correct_answer || '').trim().toLowerCase();
 
-  // 2. 核心比對邏輯：
-  // 只要「正確答案」或「學生答案」任一項有內容，就必須完全相等才算對
-  // 這樣如果正確答案是 '' (空)，但學生寫了 'v'，'' === 'v' 會回傳 false (正確判定為錯)
   if (currentAns !== '' || correctAns !== '') {
     return currentAns === correctAns ? 'TRUE' : 'FALSE';
   }
 
-  // 3. 備援邏輯：
-  // 如果兩者都是空的（表示這題本來就不該勾，學生也沒勾）
-  // 則退而求其次參考 AI 原始辨識的布林值
   if (item.is_mastered !== undefined) {
     const aiStatus = String(item.is_mastered).toUpperCase();
     return aiStatus === 'TRUE' ? 'TRUE' : 'FALSE';
   }
 
-  // 4. 預設情況
   return 'FALSE';
 };
 
-// --- 資料同步 (加上門禁門檻) ---
+// --- 資料同步---
 const fetchData = async (forceLoading = false) => {
   if (loading.value && !forceLoading) return;
 
-  // 1. 💡 門禁工具檢查
+  // 1. 門禁工具檢查
   const { getValidConfig } = useAuth();
   const config = getValidConfig();
 
@@ -690,10 +659,10 @@ const fetchData = async (forceLoading = false) => {
     return;
   }
 
-  // 2. 💡 統一變數來源
+  // 2. 統一變數來源
   const studentId = config.student_id;
   const sheetId = config.sheet_id;
-  const tabName = config.userName; // 這是學生個人分頁名稱
+  const tabName = config.userName; 
   const gasUrl = localStorage.getItem('user_gas_url');
 
   // 3. 安全檢查
@@ -705,7 +674,7 @@ const fetchData = async (forceLoading = false) => {
 
   loading.value = true;
 
-  // --- 4. 原有的監控邏輯 (保持不變) ---
+  // --- 4. 原有的監控邏輯 ---
   // 監控科目切換
   watch(selectedSubject, (newSub) => {
     loading.value = true;
@@ -726,9 +695,8 @@ const fetchData = async (forceLoading = false) => {
     setTimeout(() => { loading.value = false; }, 450);
   });
 
-  // --- 5. 執行請求 (改接 GAS) ---
+  // --- 5. 執行請求---
   try {
-    // 💡 改用 fetch 向 GAS 請求該學生的個人分頁資料
     const response = await fetch(gasUrl, {
       method: 'POST',
       body: JSON.stringify({
@@ -740,10 +708,7 @@ const fetchData = async (forceLoading = false) => {
     const result = await response.json();
     
     if (result && result.success) {
-      // 💡 這裡對接原本的 questions.value
-      // GAS 的 fetch_data 已經將資料轉為物件格式，欄位會與原本 API 一致
       questions.value = result.data || [];
-      console.log(`[Success] 已透過 GAS 載入 ${questions.value.length} 筆資料`);
     } else {
       console.error("GAS 報錯:", result.error);
     }
@@ -755,10 +720,23 @@ const fetchData = async (forceLoading = false) => {
   }
 };
 
-// --- ✨ 增加監聽器 (保持不變) ---
+const formatDate = (dateStr) => {
+  if (!dateStr) return '';
+  const date = new Date(dateStr);
+  
+  // 檢查是否為有效日期
+  if (isNaN(date.getTime())) return dateStr; 
+
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  
+  return `${y}/${m}/${d}`; // 輸出格式：2026/03/17
+};
+
+// --- ✨ 增加監聽器 ---
 watch(() => userConfig?.sheet_id, (newVal) => {
   if (newVal && questions.value.length === 0) {
-    console.log("偵測到身份資訊載入，執行 fetchData");
     fetchData();
   }
 }, { immediate: true });
@@ -766,22 +744,19 @@ watch(() => userConfig?.sheet_id, (newVal) => {
 const updateSingleItem = async (item) => {
   if (!item || !item.id) return;
 
-  // 1. 💡 門禁檢查：確保拿到正確的分頁 (不改動門禁邏輯)
+  // 1. 💡 門禁檢查：確保拿到正確的分頁 
   const { getValidConfig } = useAuth();
   const config = getValidConfig();
   if (!config) return;
 
   const gasUrl = localStorage.getItem('user_gas_url');
-  const tabName = config.userName; // 🛡️ 門禁解析出的正確分頁名
-  
-console.log("updatetabName=",tabName);
+  const tabName = config.userName; 
 
   try {
-    // 💡 改用 GAS 進行簡單的欄位更新
     const res = await fetch(gasUrl, {
       method: 'POST',
       body: JSON.stringify({
-        action: 'update', // 💡 對齊後端 action 名稱
+        action: 'update', 
         sheetName: tabName,
         updates: [{
           id: String(item.id),
@@ -805,7 +780,7 @@ console.log("updatetabName=",tabName);
   }
 };
 
-// --- 計算屬性 (過濾邏輯已移除老師權限判斷) ---
+// --- 計算屬性---
 const currentStatsData = computed(() => {
   // 1. 基礎檢查：沒資料就直接回傳
   const allData = questions.value || [];
@@ -814,12 +789,10 @@ const currentStatsData = computed(() => {
   // 2. 取得科目配置
   const currentConfig = subjectConfigs?.[selectedSubject.value];
   if (!currentConfig) {
-    // 🚩 這裡很重要：如果配置還沒載入，先回傳空，避免報錯
     return [];
   }
 
   // 3. 第一層過濾：篩選屬於該科目的類別 (Category)
-  // 增加 trim() 與 toLowerCase() 是正確的，預防 Excel 填寫時有多餘空格
   const currentCats = (currentConfig.cats || []).map(c => String(c).trim().toLowerCase());
   
   let filtered = allData.filter(q => {
@@ -832,13 +805,11 @@ const currentStatsData = computed(() => {
 
   const targetKey = String(statsViewMode.value);
   return filtered.filter(q => {
-    // 🚩 統一日期處理邏輯，確保跟 generate 考卷選單時的 key 完全一致
     const rawDate = String(q.date || '').trim().split(' ')[0].replace(/\//g, '-');
     if (!rawDate) return false;
 
     const isQuiz = String(q.id || '').toLowerCase().includes('quiz');
     
-    // 處理標題：移除「(隨堂測驗)」等字樣以便比對
     const cleanTitle = String(q.title || rawDate)
       .replace(/\s*[-\s]*[\(\（](隨堂測驗|練習卷)[\)\）]/g, '')
       .trim();
@@ -865,7 +836,6 @@ const categoryAnalysis = computed(() => {
   const groups = {};
   const currentCats = subjectConfigs[selectedSubject.value]?.cats || [];
   
-  // 初始化
   currentCats.forEach(c => { 
     groups[c] = { total: 0, masteredCount: 0 }; 
   });
@@ -875,7 +845,6 @@ const categoryAnalysis = computed(() => {
     const catName = q.category ? String(q.category).trim() : '';
     if (groups[catName]) {
       groups[catName].total++;
-      // 🚩 核心：直接讀取你的 is_mastered 欄位
       if (String(q.is_mastered).trim().toUpperCase() === 'TRUE') {
         groups[catName].masteredCount++;
       }
@@ -886,22 +855,19 @@ const categoryAnalysis = computed(() => {
     .map(c => {
       const t = groups[c].total;
       const m = groups[c].masteredCount;
-      
-      // 計算修復百分比 (masteryScore)
+
       const recoveryRate = t > 0 ? Math.round((m / t) * 100) : 0;
       
       return {
         category: c,
         total: t,
         masteredCount: m,
-        // 為了配合你 UI 的 100 - errorRate 邏輯
         errorRate: 100 - recoveryRate, 
-        // 根據修復進度給予評價
         level: recoveryRate === 100 ? '已清空' : (recoveryRate > 50 ? '修復中' : '待處理')
       };
     })
     .filter(item => item.total > 0)
-    .sort((a, b) => a.errorRate - b.errorRate); // 修復進度高的排前面，或是低的排前面提醒
+    .sort((a, b) => a.errorRate - b.errorRate);
 });
 
 const sortedFilteredQuestions = computed(() => {
@@ -919,10 +885,8 @@ const sortedFilteredQuestions = computed(() => {
 });
 
 const lineChartData = computed(() => {
-  // 1. 統一日期格式並排序
   const getCleanDate = (dateStr) => String(dateStr || '').split(' ')[0].replace(/\//g, '-');
   
-  // 🚩 這裡改用 currentStatsData，確保只計算當前科目的數據
   const dataForChart = currentStatsData.value;
   
   const dates = [...new Set(dataForChart.map(q => getCleanDate(q.date)))]
@@ -939,7 +903,6 @@ const lineChartData = computed(() => {
       borderColor: currentConfig.colors[c] || '#CCCCCC',
       backgroundColor: (currentConfig.colors[c] || '#CCCCCC') + '20',
       data: dates.map(d => {
-        // 🚩 這裡從 dataForChart 找，效率更高且更準確
         const group = dataForChart.filter(x => getCleanDate(x.date) === d && x.category === c);
         
         if (group.length === 0) return null; // 該天沒這類題目，回傳 null 讓圖表斷點(spanGaps)處理
@@ -990,7 +953,6 @@ const formattedDateOptions = computed(() => {
   });
 });
 
-// --- UI 工具 ---
 function numberToChinese(num) {
   const chinese = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
   const n = Math.floor(Number(num));
@@ -1018,7 +980,7 @@ const onFileSelected = (e) => {
       let width = img.width;
       let height = img.height;
 
-      // 1. 設定最大寬度為 1600px (對於 AI 辨識文字來說，這已經非常清晰)
+      // 1. 設定最大寬度為 1600px
       const MAX_WIDTH = 1600;
       if (width > MAX_WIDTH) {
         height *= MAX_WIDTH / width;
@@ -1036,8 +998,7 @@ const onFileSelected = (e) => {
       
       // 3. 存入陣列
       imageFiles.value.push(compressedBase64);
-      
-      console.log(`[Image] 原始尺寸: ${img.width}x${img.height}, 壓縮後尺寸: ${width}x${height}`);
+
     };
   };
   reader.readAsDataURL(file);
@@ -1045,12 +1006,11 @@ const onFileSelected = (e) => {
 
 const removeImage = (index) => { imageFiles.value.splice(index, 1); };
 
-// --- 監控與生命週期 (移除老師變換監控) ---
+// --- 監控與生命週期---
 watch(selectedSubject, async () => {
   statsViewMode.value = 'all';
   selectedCategory.value = '';
   showOnlyWrong.value = false;
-  // 增加一個小判斷，如果正在載入中就不要重疊請求
   if (!loading.value) {
     await fetchData(true);
   }
@@ -1058,14 +1018,12 @@ watch(selectedSubject, async () => {
 
 onMounted(() => { fetchData(); });
 
-// --- 漂亮通知系統 ---
 const alertConfig = reactive({ show: false, title: '', message: '', type: 'success' });
 const showAlert = (title, message, type = 'success') => {
   alertConfig.title = title; alertConfig.message = message; alertConfig.type = type; alertConfig.show = true;
   setTimeout(() => { alertConfig.show = false; }, 3500);
 };
 
-// --- 補回分頁選項配置 ---
 const tabOptions = computed(() => {
   return [
     { id: 'analytics', name: '戰力分析' },
@@ -1075,31 +1033,25 @@ const tabOptions = computed(() => {
 });
 
 
-
-// --- 強化安全性檢查：修改 categoryColors 以免讀到 undefined ---
 const categoryColors = computed(() => {
-  // 使用選用鏈 ?. 確保 subjectConfigs 存在且該科目存在
   const config = subjectConfigs?.[selectedSubject.value];
   if (!config || !config.colors) return {};
   return config.colors;
 });
 
 
-// 補回缺失的 computed
 const masteryComment = computed(() => {
   const analysis = categoryAnalysis.value; 
   if (!analysis || analysis.length === 0) return "系統待命：請上傳錯題資料以啟動 AI 戰力分析。";
 
-  // 🚩 關鍵修正：先複製一份陣列並依照 MasteryScore (100 - errorRate) 升序排列
-  // 這樣 index 0 就保證是全場最爛的項目
   const sortedAnalysis = [...analysis].sort((a, b) => (100 - a.errorRate) - (100 - b.errorRate));
   
   const weakest = sortedAnalysis[0];
-  const score = 100 - weakest.errorRate; // 計算出真正的掌握度
+  const score = 100 - weakest.errorRate;
 
   // --- 實際且專業的診斷文字 ---
 
-  // 🔴 掌握度極低 (0-50%)：例如你的字音字形 (0%)
+  // 🔴 掌握度極低 (0-50%)
   if (score <= 50) {
     return `核心警訊：你在「${weakest.category}」的掌握度僅有 ${score}%。這顯示基礎完全脫節，這類題目目前對你而言跟盲猜沒兩樣。建議立即停止盲目刷題，先從基礎字義與基礎定義重新扎根。`;
   } 
@@ -1132,18 +1084,16 @@ const saveRecord = async () => {
   uploadStatus.value = gradingMode.value === 'ai' ? 'AI 批改中...' : 'AI 診斷中...';
 
   try {
-    // 1. 呼叫 Vercel (現在只負責 AI 辨識，不負責存檔)
     const res = await $fetch('/api/assignments', {
       method: 'POST',
       body: { 
-        action: 'upload', // 對應後端的 C 模式
+        action: 'upload', 
         imageBatch: imageFiles.value, 
         subject: selectedSubject.value,
         mode: gradingMode.value,
-        userConfig: config // 傳入門禁配置供 Vercel 使用 Key
+        userConfig: config 
       }
     });
-    console.log("Vercel 辨識結果:", res); // 👈 加這一行
     if (res.success && res.data) {
       const rowsToSave = res.data.map(item => ({
         id: `task-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
@@ -1154,15 +1104,14 @@ const saveRecord = async () => {
         question_key: `第 ${item.num} 題`,
         correct_answer: item.correct_answer,
         user_answer: item.user_answer || '',
-        knowledge_point: item.original_text, // 對齊 Vercel 的 original_text
-        image_url: item.imageUrl,           // 對齊 Vercel 的 imageUrl
+        knowledge_point: item.original_text,
+        image_url: item.imageUrl,           
         is_mastered: item.is_mastered ? 'TRUE' : 'FALSE',
-        ai_explanation: item.explanation    // 對齊 Vercel 的 explanation
+        ai_explanation: item.explanation    
       }));
 
       const gasUrl = localStorage.getItem('user_gas_url');
       
-      // ✅ 這裡一定要先宣告 gasRes
       const gasRes = await fetch(gasUrl, {
         method: 'POST',
         mode: 'cors',
@@ -1174,7 +1123,6 @@ const saveRecord = async () => {
         })
       });
 
-      // ✅ 這樣這行才不會報 initialization 錯誤
       const gasResult = await gasRes.json(); 
       
       if (gasResult.success) {
@@ -1210,14 +1158,13 @@ const confirmDelete = (session) => {
 
 // --- 3. 執行刪除邏輯 ---
 const handleConfirmDelete = () => {
-  // 找出目前選中的卷別標題 (從 formattedDateOptions 找 label)
   const currentOption = formattedDateOptions.value.find(opt => opt.value === statsViewMode.value);
   
   deleteModal.value = { 
     show: true, 
     session: { 
       topic: currentOption ? currentOption.label : statsViewMode.value,
-      sessionId: statsViewMode.value // 假設你的 ID 就是卷別名稱
+      sessionId: statsViewMode.value 
     } 
   };
 };
@@ -1226,7 +1173,7 @@ const executeDelete = async () => {
   const target = deleteModal.value.session; 
   if (!target) return;
 
-  // 1. 💡 門禁檢查：確保操作者身分合法 (維持舊有設計)
+  // 1. 門禁檢查：確保操作者身分合法 
   const { getValidConfig } = useAuth();
   const config = getValidConfig();
 
@@ -1237,18 +1184,14 @@ const executeDelete = async () => {
   }
 
   isDeleting.value = true;
-  // 🚩 核心修正：手動指定狀態為 'del'，觸發載入文字變更
   activeTab.value = 'del';
-
   const gasUrl = localStorage.getItem('user_gas_url');
 
-  // --- 🚩 關鍵修正：判斷是「單題刪除」還是「整卷刪除」 (邏輯完全保留) ---
   let targetIds = [];
 
   if (target.id) {
     // 1. 單題刪除
     targetIds = [String(target.id)];
-    console.log("執行單題刪除，ID:", targetIds);
   } else {
     // 2. 整卷刪除
     const currentViewKey = statsViewMode.value;
@@ -1263,7 +1206,6 @@ const executeDelete = async () => {
         return currentKey === currentViewKey;
       })
       .map(q => String(q.id));
-    console.log("執行整卷刪除，總計題數:", targetIds.length);
   }
 
   // 安全檢查
@@ -1276,14 +1218,13 @@ const executeDelete = async () => {
   }
 
   try {
-    // 💡 2. 核心修改點：改接 GAS，並對齊動作「I」的邏輯
     const response = await fetch(gasUrl, {
       method: 'POST',
       body: JSON.stringify({
-        action: 'deleteAssignment', // 對應 GAS 腳本中的動作 I
-        sheetName: config.sheet_name, // 🛡️ 門禁解析的分頁名稱
-        ids: targetIds,               // 傳入要刪除的 ID 陣列
-        studentId: config.student_id  // 額外傳入身分標記（選用）
+        action: 'deleteAssignment', 
+        sheetName: config.sheet_name, 
+        ids: targetIds,               
+        studentId: config.student_id  
       })
     });
 
@@ -1293,7 +1234,6 @@ const executeDelete = async () => {
       deleteModal.value.show = false; 
       showAlert('刪除成功', `已移除 ${targetIds.length} 筆紀錄`, 'success');
       
-      // 同步更新畫面上的資料 (維持原設計)
       questions.value = questions.value.filter(q => !targetIds.includes(String(q.id)));
       
       if (!target.id) {
@@ -1326,7 +1266,7 @@ const reAnalyzeItem = async (item) => {
       method: 'POST',
       body: {
         action: 're_analyze',
-        sheetId: config.sheet_id,  // 使用門禁工具的變數
+        sheetId: config.sheet_id,  
         studentId: config.student_id, 
         subject: selectedSubject.value,
         question_text: item.knowledge_point, 
@@ -1335,10 +1275,8 @@ const reAnalyzeItem = async (item) => {
     });
 
     if (response.success) {
-      // 🚩 接收新的 AI 解釋
       item.ai_explanation = response.explanation;
-      
-      // 🚩 成功後直接呼叫你現有的同步函式，把新解釋存回雲端
+
       await updateSingleItem(item); 
     } else {
       console.error('AI 重新診斷失敗:', response.error);
@@ -1356,7 +1294,7 @@ const deleteItem = (id, noID) => {
     show: true,
     session: { 
       topic: noID, 
-      id: id  // 🚩 這裡一定要有 id
+      id: id  
     }
   };
 };
@@ -1365,7 +1303,6 @@ const openGoogleAI = (item) => {
   const keyword = item.knowledge_point || "";
   if (!keyword) return;
   
-  // 加上「定義」或「原理」關鍵字，強制觸發 Google 的知識摘要與 AI 總結
   const query = encodeURIComponent(`${selectedSubject.value} ${keyword} 原理定義`);
   window.open(`https://www.google.com/search?q=${query}`, '_blank');
   
@@ -1439,7 +1376,7 @@ watch(activeTab, (newTab) => {
 .slide-fade-enter-from, .slide-fade-leave-to { transform: translate(-50%, -20px); opacity: 0; }
 .animate-spin { animation: spin 1s linear infinite; }
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-/* 通知動畫：從上方滑入並有縮放感 */
+
 .notification-enter-active,
 .notification-leave-active {
   transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
@@ -1455,14 +1392,10 @@ watch(activeTab, (newTab) => {
   transform: translate(-50%, -20px) scale(0.95);
 }
 
-/* 讓圖片縮放的 Transition 更順暢 */
 .slide-fade-enter-active {
   transition: all 0.3s ease-out;
 }
 
-
-
-/* 🌟 全域載入遮罩樣式 */
 .global-loader-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
@@ -1496,7 +1429,7 @@ watch(activeTab, (newTab) => {
   color: #64748b;
 }
 
-/* 漸變動畫 */
+
 .fade-enter-active, .fade-leave-active {
   transition: opacity 0.3s ease;
 }
@@ -1504,7 +1437,6 @@ watch(activeTab, (newTab) => {
   opacity: 0;
 }
 
-/* 其他既有動畫保持不變... */
 .slide-fade-enter-active, .slide-fade-leave-active { transition: all 0.4s ease; }
 .slide-fade-enter-from, .slide-fade-leave-to { opacity: 0; transform: translate(-50%, -20px); }
 
