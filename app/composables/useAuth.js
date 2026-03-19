@@ -25,7 +25,8 @@ export const useAuth = () => {
               window.authGuardAlert(
                 '設定未完成', 
                 `哎呀！你漏填了 【${item.label}】，請先到設置頁面完成設定才能使用 AI 功能喔！`, 
-                'warning'
+                'warning',
+                true
               );
             } else {
               alert(`請確認 ${item.label} 已填寫`);
