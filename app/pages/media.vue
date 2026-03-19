@@ -480,7 +480,7 @@ const newSession = ref({
   pointsRaw: '',
   category: '', 
   quizMode: 'concept', 
-  quizCount: 10 // 👈 預設為 10 題
+  quizCount: 10 // 預設為 10 題
 });
 
 //觸發隱藏的 input click
@@ -490,16 +490,24 @@ const triggerCamera = () => {
 
 //1. 處理照片並送往 AI
 const handlePhotoUpload = async (event) => {
-  // 1.🛡️ 門禁守衛：直接取得驗證過的設定
+
+  const files = Array.from(event.target.files);
+
+  if (files.length > 2) {
+    window.alert('⚠️ AI 老師一次只能看 2 張照片，請減少張數。');
+    event.target.value = ''; 
+    return;
+  }
+
+
+  // 1. 門禁守衛：直接取得驗證過的設定
   const auth = getValidConfig();
   if (!auth) {
     event.target.value = ''; 
     return;
   }
 
-  const files = Array.from(event.target.files);
-  if (files.length === 0) return;
-
+  
   // 2. 通過檢查，直接從 auth 拿到所有設定
   const userConfig = auth; 
 
@@ -507,7 +515,7 @@ const handlePhotoUpload = async (event) => {
   uploadStatus.value = 'AI 正在解析筆記內容...';
 
   try {
-    // --- ✨ 壓縮圖片的 Promise 工具 ---
+    // --- 壓縮圖片的 Promise 工具 ---
     const compressImage = (file) => {
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
