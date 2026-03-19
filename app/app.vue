@@ -184,39 +184,37 @@ const router = useRouter();
  * @param {string} title - 標題
  * @param {string} text - 內容
  * @param {string} icon - 圖示 (success, error, warning, info, question)
+ * @param {boolean} isConfigMode - 是否為「引導至設定頁」模式
  */
-const showAlert = (title, text, icon = 'info') => {
-  const isAuthGuard = title.includes('設定') || title.includes('存取');
-
+const showAlert = (title, text, icon = 'info', isConfigMode = false) => {
   Swal.fire({
-    // 💡 標題：加強字重與字距
-    title: `<span style="font-weight: 900; color: #1E293B; letter-spacing: 0.3em; text-transform: uppercase;">${title}</span>`,
-    html: `<div style="line-height: 1.8; color: #475569; font-size: 15px; font-weight: 500; padding: 0 15px;">${text}</div>`,
-    
+    title: `<span style="font-weight: 900; color: #1E293B; letter-spacing: 0.1em;">${title}</span>`,
+    html: `<div style="line-height: 1.6; color: #475569; font-size: 15px;">${text}</div>`,
     icon: icon,
-    iconColor: '#3B82F6', 
+    iconColor: icon === 'error' ? '#EF4444' : '#3B82F6',
     
-    confirmButtonText: '前往設置頁面 →',
-    showCancelButton: true,
+    // 💡 根據模式切換按鈕文字
+    confirmButtonText: isConfigMode ? '前往設置頁面 →' : '我知道了',
+    showCancelButton: isConfigMode, // 只有設定模式才顯示取消按鈕
     cancelButtonText: '稍後再說',
     
-    buttonsStyling: true, 
-    confirmButtonColor: '#2563EB', // 💡 換成紮實的強烈寶藍
-    cancelButtonColor: '#F8FAFC', 
+    confirmButtonColor: '#2563EB',
+    cancelButtonColor: '#F1F5F9',
+    reverseButtons: true, // 讓確定按鈕在右邊，符合直覺
     
     customClass: {
       popup: 'allegro-bold-popup',
-      actions: 'allegro-bold-actions',
-      confirmButton: 'allegro-bold-btn btn-bold-confirm',
-      cancelButton: 'allegro-bold-btn btn-bold-cancel'
+      confirmButton: 'allegro-bold-btn',
+      cancelButton: 'allegro-bold-btn-cancel'
     },
     
     background: '#FFFFFF',
-    backdrop: `rgba(15, 23, 42, 0.15)`, // 稍微加深遮罩，凸顯亮色彈窗
+    backdrop: `rgba(15, 23, 42, 0.2)`,
     showClass: { popup: 'animate__animated animate__zoomIn animate__faster' },
     hideClass: { popup: 'animate__animated animate__fadeOut animate__faster' }
   }).then((result) => {
-    if (result.isConfirmed) {
+    // 💡 只有在「設定模式」且「點擊確定」時才跳轉
+    if (isConfigMode && result.isConfirmed) {
       router.push({ path: '/settings', query: { first_time: 'true' } });
     }
   });
@@ -258,17 +256,15 @@ const refreshConfig = () => {
       userName.value = globalConfig.userName;
 
       // 3. ✨ 關鍵修改：同步回 config 時，要用「合併」的
-      // 讀取目前的 config，只更新跟身分有關的欄位，保留 gemini_key
       const currentConfig = configData ? JSON.parse(configData) : {};
       const mergedConfig = {
-        ...currentConfig, // 保留舊有的 gemini_key 等
+        ...currentConfig, 
         sheet_id: auth.sheet_id,
         student_id: auth.student_id || auth.id,
         role: auth.role
       };
       
       localStorage.setItem('allegro_config', JSON.stringify(mergedConfig));
-      console.log('[Config] 系統配置已恢復且合併:', globalConfig.student_id);
     } catch (e) {
       console.error('[Config] 解析 Session 失敗', e);
     }
@@ -278,7 +274,6 @@ const refreshConfig = () => {
 };
 
 const handleLoginSuccess = (user) => {
-  // 1. 🚩 不要直接刪除！先讀取現有的 config (裡面有妳的 gemini_key)
   const existingConfigRaw = localStorage.getItem('allegro_config');
   let existingConfig = {};
   
@@ -290,7 +285,7 @@ const handleLoginSuccess = (user) => {
     }
   }
 
-  // 2. 更新 Session (這可以清除舊的 Session 沒關係，因為 Session 只管登入身分)
+  // 2. 更新 Session
   localStorage.removeItem('allegro_auth_session');
   localStorage.setItem('allegro_auth_session', JSON.stringify({
     isLoggedIn: true,
@@ -300,11 +295,10 @@ const handleLoginSuccess = (user) => {
   }));
 
   // 3. 🚩 關鍵：合併 Config 而不是覆蓋
-  // 使用 ...existingConfig 保留舊家具，再把新的身分 ID 塞進去
   const newConfig = {
-    ...existingConfig,        // 保留 gemini_key 等環境變數
-    sheet_id: user.sheet_id,  // 更新為當前登入者的表
-    student_id: user.id,      // 更新為當前登入者的 ID
+    ...existingConfig,        
+    sheet_id: user.sheet_id,  
+    student_id: user.id,     
     role: user.role
   };
   
@@ -324,14 +318,11 @@ const handleLogin = async () => {
   let code = loginInput.value.trim().toLowerCase();
   
   let sheetId = loginSheetId.value.trim();  
-console.log("code=",code);
-  console.log("sheetId=",sheetId);
-  if (!code || !sheetId) return alert('請輸入登入代碼與 Google Sheet ID');
 
+  if (!code || !sheetId) return showAlert('欄位遺漏', '請輸入登入代碼與 Google Sheet ID', 'warning');
   try {
     showToast('正在連線至雲端資料庫...');
 
-    // 💡 關鍵：直接請求公開的 JSON 資料格式
     // 注意：sheet=User_Registry 必須與你分頁名稱完全一致
     const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=User_Registry`;
     
@@ -360,18 +351,17 @@ console.log("code=",code);
       
       handleLoginSuccess(user);
     } else {
-      alert('登入失敗：找不到匹配的登入代碼');
+      showAlert('登入失敗', '找不到匹配的登入代碼，請重新確認。', 'error');
     }
   } catch (e) {
-    console.error('Login Error:', e);
-    alert('登入發生錯誤：' + (e.message || '請檢查網路或試算表權限'));
+    showAlert('連線錯誤', e.message || '請檢查網路或試算表權限', 'error');
   }
 };
 
 // 4. ✨ 新增註冊邏輯
 const handleRegister = async () => {
   if (!regForm.student_id || !regForm.login_code || !regForm.sheet_id) {
-    return alert('請填寫完整註冊資訊');
+    return showAlert('資訊不完整', '請填寫完整註冊資訊才能開始初始化。', 'warning');
   }
   isProcessing.value = true;
   try {
@@ -398,7 +388,6 @@ const handleRegister = async () => {
       await handleLogin(); 
 
       // 🚩 4. 【關鍵跳轉】註冊後直接引導至設定頁面填寫 API Key
-      // 我們延遲一小段時間確保 handleLogin 的 toast 先顯示，再跳轉
       setTimeout(() => {
         router.push('/settings');
         // 提醒使用者下一步該做什麼
@@ -408,22 +397,29 @@ const handleRegister = async () => {
       }, 800);
     }
   } catch (e) {
-    alert(e.data?.message || '初始化失敗');
+    showAlert('初始化失敗', e.data?.message || '請檢查 Sheet ID 是否正確。', 'error');
   } finally {
     isProcessing.value = false;
   }
 };
 
 const logout = () => {
-  if (confirm('確定要登出嗎？')) {
-    localStorage.removeItem('allegro_auth_session'); 
-    isLoggedIn.value = false;
-    globalConfig.role = 'student';
-    globalConfig.student_id = '';
-    globalConfig.userName = '';
-    globalConfig.sheet_name = '';
-    window.location.replace('/'); 
-  }
+  Swal.fire({
+    title: '確定要登出嗎？',
+    text: "登出後需要重新輸入登入代碼才能存取。完成的學習數據不會消失。",
+    icon: 'question',
+    showCancelButton: true,
+    confirmButtonColor: '#E11D48', // 登出用紅色表示危險動作
+    cancelButtonColor: '#64748B',
+    confirmButtonText: '確定登出',
+    cancelButtonText: '繼續學習'
+  }).then((result) => {
+    if (result.isConfirmed) {
+      localStorage.removeItem('allegro_auth_session'); 
+      isLoggedIn.value = false;
+      window.location.replace('/'); 
+    }
+  });
 };
 
 const updateGlobalConfig = () => refreshConfig();
@@ -447,11 +443,9 @@ provide('updateGlobalConfig', updateGlobalConfig);
 // --- 導覽連結 (保留原本內容) ---
 const navLinks = [
   { path: '/', label: '今日修復任務', teacherLabel: '今日修復任務', icon: '🌱' },
-  { path: '/media', label: '學習日誌', teacherLabel: '課堂紀錄與評量', icon: '📓' },
-  { path: '/class-analytics', label: '全班戰力分析', teacherLabel: '考卷檔案庫', icon: '📊' },              
+  { path: '/media', label: '學習日誌', teacherLabel: '課堂紀錄與評量', icon: '📓' },           
   { path: '/theory', label: '考卷檔案庫', teacherLabel: '個體診斷', icon: '🔬' },
   { path: '/clinic', label: 'AI 診療中心', teacherLabel: '精準醫療室', icon: '🏥' },
-  { path: '/add-assignment', label: '新增練習', teacherLabel: '派發任務', icon: '＋' }, 
   { path: '/settings', label: '系統核心設定', teacherLabel: '管理中心', icon: '⚙️' }          
 ];
 
