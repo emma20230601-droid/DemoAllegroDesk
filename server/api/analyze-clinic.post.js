@@ -9,10 +9,9 @@ export default defineEventHandler(async (event) => {
   try {
     const body = await readBody(event);
     
-    // 🚩 修正 1：從 body 中解構出 userConfig，這樣才能拿到前端傳來的 key
     const { student_id, studentName, subject, errors, userConfig } = body; 
 
-    // --- 🛡️ 核心門禁 (Google Service Account 邏輯維持) ---
+    // --- 核心門禁 ---
     let credentials = {};
     if (config.googleCredentials) {
       credentials = typeof config.googleCredentials === 'string' 
@@ -26,10 +25,9 @@ export default defineEventHandler(async (event) => {
     }
     const privateKey = credentials?.private_key ? credentials.private_key.replace(/\\n/g, '\n') : null;
 
-    // 🚩 修正 2：優先順序 —— 前端傳來的 Key > 環境變數中的 Key
+    // 優先順序 —— 前端傳來的 Key > 環境變數中的 Key
     const GEMINI_KEY = userConfig?.gemini_key || config.geminiApiKey;
-    
-    // 🚩 修正 3：修正模型名稱 (2.5 尚未存在，建議用 1.5-flash 或 2.0-flash)
+  
     const GEMINI_MODEL = config.geminiModel || "gemini-2.5-flash"; 
 
     if (!GEMINI_KEY) {
@@ -46,7 +44,7 @@ export default defineEventHandler(async (event) => {
       generationConfig: { responseMimeType: "application/json" }
     });
     // 2. 核心 Prompt 指令
-     let finalPrompt = "";
+    let finalPrompt = "";
     if (body.mode === 'greeting') {
       // --- 模式 A：首頁自動診斷 (輕量化) ---
       finalPrompt = `
@@ -56,15 +54,15 @@ export default defineEventHandler(async (event) => {
         【最近的錯誤重點】: ${JSON.stringify(errors.slice(0, 3))} // 只給最近 3 個，加速解析
         
         【任務】: 
-        請寫一句「龍蝦留言」給學生。
+        請寫一段「龍蝦留言」給學生。
         1. 語氣：像陪在旁邊的朋友，帶點幽默。
         2. 內容：點出一個他最近常犯的具體問題（例如：嘉南大圳、或是某個英文時態），並給予鼓勵。
-        3. 限制：30 字以內，繁體中文。
+        3. 限制：50 字以內，繁體中文。
         4. 格式：{"greeting": "你的留言內容"}
       `;
     } else {
 
-    finalPrompt =  `
+    finalPrompt = `
     ### CRITICAL LANGUAGE RULE ###
     1. If the subject is "英文" or "English":
        - The "question" and "options" MUST be written in 100% English. 
