@@ -538,7 +538,7 @@ const generateWrongQuestionsPDF = () => {
                   <div class="item">
                     <div class="q-title">
                       <span>第 ${index + 1} 題 <small style="font-weight:normal; color:#666;">[${item.category}]</small></span>
-                      <span style="font-size: 8pt; font-weight: normal; color: #999;">${item.date?.split(' ')[0] || ''}</span>
+                      <span style="font-size: 8pt; font-weight: normal; color: #999;"> ${formatDate(item.date).split(' ')[0] || ''}</span>
                     </div>
                     <div class="q-content">${item.knowledge_point || '無內容'}</div>
                     
@@ -1350,6 +1350,8 @@ const handleAIQuery = (type, item) => {
 
   window.open(baseUrl, '_blank');
 };
+
+
 
 
 // 分頁切換載入文字
