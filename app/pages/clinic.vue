@@ -8,7 +8,7 @@
         </div>
         <p class="text-[10px] font-bold text-gray-400 tracking-[0.3em] uppercase">
           PATIENT: {{ currentStudent }} | DEPT: {{ selectedSubject }}
-        </p> 
+        </p>
       </div>
       <div class="text-[10px] text-gray-400 font-bold mb-2">
         正在掃描細項：{{ subjectConfigs[selectedSubject]?.cats.join('、') }}
@@ -617,63 +617,48 @@ const { getValidConfig } = useAuth();
 const activeTab = ref('盲點溯源');
 const isAnalyzing = ref(false);
 const clinicData = ref(null);
-const selectedSubject = ref('國文'); // 預設值，稍後會被 query 覆蓋
+const selectedSubject = ref('國文'); 
 const allQuestions = ref([]); 
-const selectedTitle = ref('全部卷別'); // 預設值，稍後會被 query 覆蓋
-const isTitleDiagnosed = ref(false); // 🚩 這裡只保留一個定義
-const isModalOpen = ref(false); // 控制 Modal 顯示與否
-const activeAction = ref(null); // 儲存目前選中的行動詳情
+const selectedTitle = ref('全部卷別'); 
+const isTitleDiagnosed = ref(false); 
+const isModalOpen = ref(false); 
+const activeAction = ref(null); 
 const practiceQuizzes = ref([]);
-const quizStates = ref([]); // 記錄每一題的狀態：'pending', 'correct', 'wrong'
+const quizStates = ref([]); 
 const userAnswers = ref({});
 const analysisMessage = ref('正在進行深度思維架構診斷...');
 const analysisTitle = ref('Deep Logic Scanning');
 const currentVersion = ref('v1');
-
-// 1. 定義全域載入狀態 (控制全螢幕轉圈)
-const loading = ref(false);
-
-// 2. 定義載入時顯示的文字內容
+const loading = ref(false);// 1. 定義全域載入狀態 (控制全螢幕轉圈)
 const uploadStatus = ref('');
-
-// 3. 學生資料
-const currentStudent = ref(userConfig?.userName || 'Anna');
+const currentStudent = ref(userConfig?.userName || 'Emma');
 
 const safeParse = (val) => {
-  // 1. 攔截真正的空值或字串形式的空值
   if (val === null || val === undefined || val === '' || val === 'null' || val === 'undefined') {
     return null;
   }
   
-  // 2. 如果已經是物件（Array 或 Object），直接回傳
   if (typeof val === 'object') return val;
   
-  // 3. 嘗試解析字串
   try { 
     return JSON.parse(val); 
   } catch (e) { 
-    // 這裡檢查是否本來就是純文字而非 JSON 字串
-    // 如果解析失敗但它是有內容的字串，就視需求決定回傳 null 還是原字串
     console.warn("解析 JSON 失敗，回傳 null:", val);
     return null; 
   }
 };
 
-// --- 🚩 新增：處理外部跳轉跳入的邏輯 ---
+// ---處理外部跳轉跳入的邏輯 ---
 const handleIncomingQuery = () => {
   const { subject, title, mode } = route.query;
-  console.log("route.query=",route.query);
   if (subject) {
     selectedSubject.value = subject;
-    console.log('✅ 已自動對準科目:', subject);
   }
   
   if (title) {
     selectedTitle.value = title;
-    console.log('✅ 已自動鎖定卷別:', title);
   }
 
-  // 根據傳過來的模式切換 Tab
   if (mode === 'patch' || title) {
     activeTab.value = '思維重構'; 
   }
@@ -755,14 +740,12 @@ const fetchStudentData = async (forceLoading = false) => {
   const auth = getValidConfig();
   if (!auth) return;
 
-  // 🚩 如果呼叫時傳入 true，就啟動轉圈
   if (forceLoading) {
     loading.value = true;
     uploadStatus.value = "正在同步最新題庫...";
   }
 
   try {
-    // 🚩 從原本的 Vercel API 改為請求 GAS
     const gasUrl = localStorage.getItem('user_gas_url');
     
     const response = await fetch(gasUrl, {
@@ -780,17 +763,13 @@ const fetchStudentData = async (forceLoading = false) => {
 
     const result = await response.json();
 
-    // 🚩 保持原本設計：將結果存入 allQuestions.value
-    // 注意：GAS 回傳的是 { success: true, data: [...] }
     if (result?.success) {
       allQuestions.value = result.data || [];
-      console.log('✅ 題庫同步成功，總數:', allQuestions.value.length);
     }
   } catch (e) {
     console.error('❌ [Clinic Fetch Error]', e);
     showToast('無法讀取題庫，請確認網路連線', 'error');
   } finally {
-    // 🚩 結束後關閉轉圈
     if (forceLoading) {
       loading.value = false;
       uploadStatus.value = "";
@@ -798,7 +777,7 @@ const fetchStudentData = async (forceLoading = false) => {
   }
 };
 
-// 🚩 核心：讀取歷史診斷紀錄 (整合版)
+// 讀取歷史診斷紀錄
 const fetchTargetDiagnosis = async (params = {}) => {
   if (process.server) return;
   
@@ -812,9 +791,8 @@ const fetchTargetDiagnosis = async (params = {}) => {
   const tit = params.title || selectedTitle.value || '全部卷別';
 
   try {
-    // 🚩 核心修改：切換為 GAS 請求
     const gasUrl = localStorage.getItem('user_gas_url');
-    const targetSheetName = `${auth.userName}_Clinic`; // 對齊後端 xxxx_Clinic 邏輯
+    const targetSheetName = `${auth.userName}_Clinic`; 
 
     const response = await fetch(gasUrl, {
       method: 'POST',
@@ -830,8 +808,6 @@ const fetchTargetDiagnosis = async (params = {}) => {
 
     const res = await response.json();
 
-    // 🚩 模擬原本 Vercel 的 response.success && response.data 結構
-    // 從 GAS 回傳的陣列中找到匹配科目與卷別的一列
     if (res.success && res.data) {
       const foundData = res.data.find(r => 
         String(r.subject || r.Subject || '').trim() === String(sub).trim() && 
@@ -839,7 +815,6 @@ const fetchTargetDiagnosis = async (params = {}) => {
       );
 
       if (foundData) {
-        // --- 🟢 以下完全保留你原始的解析與攤平邏輯，不做任何更動 ---
         const d = foundData;
         const extraData = safeParse(d.diagnosis_json) || {};
         
@@ -905,7 +880,6 @@ const fetchTargetDiagnosis = async (params = {}) => {
           userAnswers.value = {};
         }
         isTitleDiagnosed.value = true;
-        // --- 🟢 原始邏輯結束 ---
       } else {
         // 找不到對應科目卷別的紀錄
         clinicData.value = null;
@@ -928,7 +902,7 @@ const fetchTargetDiagnosis = async (params = {}) => {
 
 // 啟動診斷
 const handleStartDiagnosis = async (force = false) => {
-  // 🛡️ 🚩 門禁守衛：從 getValidConfig 獲取統一資料
+  // 門禁守衛
   const auth = getValidConfig();
   if (!auth) return;
 
@@ -937,14 +911,12 @@ const handleStartDiagnosis = async (force = false) => {
     return;
   }
 
-// 🚩 修正判斷邏輯：如果 clinicData 還沒有資料，代表是「全新診斷」
   const isActuallyNew = !clinicData.value || !clinicData.value.quizzes;
   
   analysisTitle.value = (force && !isActuallyNew) ? 'Logic Patch Re-Generation' : 'Deep Logic Scanning';
   analysisMessage.value = (force && !isActuallyNew) ? '正在重新編譯挑戰題目...' : '正在進行深度思維架構診斷...';
   isAnalyzing.value = true;
 
-// 🚩 現在 displayName 會是「碼農媽媽」而非「s001」
   const displayName = auth.userName; 
   isAnalyzing.value = true;
 
@@ -963,7 +935,6 @@ const handleStartDiagnosis = async (force = false) => {
         studentName: displayName, 
         subject: selectedSubject.value,
         title: selectedTitle.value,
-        // 傳遞錯題資料
         errors: currentSubjectErrors.value.map(q => ({
           title: q.title,
           point: q.knowledge_point,
@@ -971,31 +942,27 @@ const handleStartDiagnosis = async (force = false) => {
           correct: q.correct_answer
         })),
         sheetId: auth.sheet_id,
-        // 🚩 關鍵修正：把 API Key 從 auth 帶給後端
         userConfig: {
           gemini_key: auth.gemini_key
         }
       }
     }).catch(err => {
-      // 🚩 這裡最關鍵：如果網路層級就報錯（例如 429 或 500），直接攔截
       return { success: false, message: err.data?.message || err.message };
     });
 
     if (!result || result.success === false) {
       const errorMsg = result?.message || '';
 
-      // 🚩 針對你遇到的 429 額度問題進行特殊處理
       if (errorMsg.includes('429') || errorMsg.includes('quota')) {
-        showToast('AI 額度已達上限或太頻繁，請稍後再試', 'error'); // 改用 error 更顯眼
+        showToast('AI 額度已達上限或太頻繁，請稍後再試', 'error'); 
         
         isAnalyzing.value = true; 
         analysisTitle.value = "Quota Exceeded";
-        // 在攔截 429 錯誤的地方
         analysisMessage.value = `<span style="font-size: 24px; font-weight: bold; color: #ef4444;">⚡️ AI 能量耗盡，請稍候再啟動...</span>`;
         
         setTimeout(() => {
           isAnalyzing.value = false;
-        }, 7000); // 額度問題通常要等久一點，這裡先設 15 秒
+        }, 7000); 
 
         return; 
       }
@@ -1044,24 +1011,19 @@ const handleStartDiagnosis = async (force = false) => {
     clinicData.value = newData;
     practiceQuizzes.value = result.quizzes; 
 
-    // 🚩 關鍵修正：分析完畢後立即執行「雲端存檔」
     await saveDiagnosisToSheet(newData); 
     
-    // 🚩 修正：更新成功後，讓系統重新標記已診斷
     isTitleDiagnosed.value = true;
 
-// 🚩 核心修正 A：清空作答狀態（跟重做一樣）
     userAnswers.value = {}; 
 
-
-    // 🚩 核心修正 C：UI 跳轉至第一題
     await nextTick(); // 確保 DOM 已更新
     setTimeout(() => {
       scrollToFirstQuiz(); // 執行捲動
       showToast(force ? '補丁已重新生成' : '深度診斷完成，請開始思維挑戰', 'success');
     }, 100);
 
-  } catch (e) {// 🚩 這裡不要只用 console.warn，一定要用 showToast 讓 UI 有反應
+  } catch (e) {
     console.error("診斷過程發生異常:", e);
     showToast(`診斷失敗：${e.message || '伺服器未回應'}`, 'error');
   } finally {
@@ -1072,7 +1034,6 @@ const handleStartDiagnosis = async (force = false) => {
   }
 };
 
-// 計算每個卷別的錯誤率
 const titleStats = computed(() => {
   const stats = {};
   const config = subjectConfigs ? subjectConfigs[selectedSubject.value] : null;
@@ -1100,7 +1061,6 @@ const titleStats = computed(() => {
   return stats;
 });
 
-// --- 修改後的 handleAnswer ---
 const handleAnswer = async (quizIdx, optionIndex) => {
   const quiz = practiceQuizzes.value[quizIdx];
   if (!quiz) return;
@@ -1108,7 +1068,6 @@ const handleAnswer = async (quizIdx, optionIndex) => {
   const selectedText = quiz.options[optionIndex];
   const isCorrect = selectedText.startsWith(quiz.answer) || selectedText === quiz.answer;
 
-  // 更新本地暫存答案
   userAnswers.value = {
     ...userAnswers.value,
     [quizIdx]: {
@@ -1123,31 +1082,24 @@ const handleAnswer = async (quizIdx, optionIndex) => {
     const allCorrect = practiceQuizzes.value.every((_, idx) => userAnswers.value[idx]?.isCorrect);
     
     if (allCorrect) {
-      // 🚩 核心修正：動態獲取當前最新的版本 Key
-      // 如果 clinicData 裡有資料，確保抓取的是 quizzes 物件中最後一個 Key (即當前練習的版本)
       const vKeys = Object.keys(clinicData.value?.quizzes || {});
       const targetVer = vKeys.length > 0 ? vKeys[vKeys.length - 1] : currentVersion.value;
       
-      console.log(`🎯 檢測通過，準備存入版本: ${targetVer}`);
 
       if (!clinicData.value) clinicData.value = {};
       clinicData.value.is_mastered = true;
       
-      // 確保 quiz_results 結構正確
       if (!clinicData.value.quiz_results || Array.isArray(clinicData.value.quiz_results)) {
         clinicData.value.quiz_results = {};
       }
 
-      // 將當前答案存入正確的版本欄位
       const currentResArray = practiceQuizzes.value.map((_, idx) => userAnswers.value[idx]);
       clinicData.value.quiz_results[targetVer] = currentResArray;
       
       showToast('🏆 檢測通過！正在同步修復檔案庫...', 'success');
       
-      // 執行存檔
       await saveDiagnosisToSheet(clinicData.value);
       
-      // 延遲刷新數據
       setTimeout(() => { fetchStudentData(false); }, 1000);
     }
   } else {
@@ -1178,7 +1130,6 @@ const currentSubjectErrors = computed(() => {
   });
 });
 
-// 存檔邏輯
 const saveDiagnosisToSheet = async (data) => {
   const auth = getValidConfig();
   if (!auth) return;
@@ -1190,7 +1141,6 @@ const saveDiagnosisToSheet = async (data) => {
   const gasUrl = localStorage.getItem('user_gas_url');
   const targetSheetName = `${auth.userName}_Clinic`;
 
-  // 🛡️ 保護：確保標題與診斷物件存在
   let finalTitle = data?.title || clinicData.value?.title || selectedTitle.value || "全部卷別";
 
   try {
@@ -1199,11 +1149,10 @@ const saveDiagnosisToSheet = async (data) => {
       mode: 'cors',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({
-        action: 'save_diagnosis', // 🚩 這裡要對應 GAS 裡的 if (action === 'save_diagnosis')
+        action: 'save_diagnosis', 
         sheetName: targetSheetName,
         subject: selectedSubject.value,
         title: finalTitle,
-        // 🚩 直接傳送診斷物件，讓 GAS 處理「版本合併」與「JSON 字串化」
         diagnosis: {
           summary: data.summary || "",
           tags: data.tags || [],
@@ -1219,9 +1168,8 @@ const saveDiagnosisToSheet = async (data) => {
     const result = await response.json();
     
     if (result.success) {
-      console.log("✅ GAS 存檔成功：", result.message);
+      //console.log("✅ GAS 存檔成功：", result.message);
     } else {
-      // 🚩 如果 GAS 報 ReferenceError，這裡會抓到並顯示
       throw new Error(result.error);
     }
   } catch (error) {
@@ -1255,7 +1203,6 @@ const loadCachedClinicData = () => {
   }
 };
 
-// 🚩 統一監控：科目或卷別變動時觸發讀取
 let debounceTimer = null;
 
 const handleResetQuiz = () => {
@@ -1269,17 +1216,13 @@ const handleResetQuiz = () => {
 };
 
 
-// 🚩 核心：讓 AI 重新出題 (簡化版)
 const handleRegenerateQuizzes = async () => {
-  // 1. 重置 UI 狀態
+
   userAnswers.value = {}; 
   
   try {
-    // 2. 呼叫診斷邏輯 (force = true)
-    // 存檔動作已經內建在 handleStartDiagnosis 裡了，這裡不需要再寫 saveDiagnosisToSheet
     await handleStartDiagnosis(true); 
 
-    // 3. 強制切換到最新版本 (這部分保留，確保前端 UI 選中最新 Tab)
     const vKeys = Object.keys(clinicData.value.quizzes);
     currentVersion.value = vKeys[vKeys.length - 1];
 
@@ -1324,42 +1267,32 @@ const switchVersion = (verKey) => {
   showToast(`已切換至歷程版本 ${verKey}`, 'info');
 };
 
-// --- 以下保留你原始代碼中重複的 Watcher 邏輯 ---
-
-// --- 🚩 1. 處理 URL 參數與學生資料初始化 ---
 watch(() => route.query, () => handleIncomingQuery(), { deep: true });
 
 watch(() => userConfig?.student_id, (newId) => {
   if (newId) fetchStudentData();
 }, { immediate: true });
 
-// --- 🚩 2. 選單自動校正器 (核心修復) ---
-// 當題庫載入或科目切換導致 availableTitles 變動時，確保 selectedTitle 合法
+
 watch(availableTitles, (newOptions) => {
   if (!newOptions.includes(selectedTitle.value)) {
-    console.log("🎯 選項不匹配，重置為：全部卷別");
     selectedTitle.value = '全部卷別';
   }
 }, { immediate: true });
 
-// --- 🚩 3. 數據同步監聽器 (防抖唯一入口) ---
-// 這裡刪除原本重複的 watch(selectedSubject) 和 watch([sub, tit])
 watch([selectedSubject, selectedTitle], async ([newSub, newTitle], [oldSub, oldTitle]) => {
-  // 門禁：正在分析或資料不齊時不抓取
+
   if (isAnalyzing.value || !newSub || !newTitle) return;
 
-  // 防抖處理：避免頻繁切換科目時轟炸後端 API
   if (debounceTimer) clearTimeout(debounceTimer);
 
   debounceTimer = setTimeout(async () => {
-    // 預載快取，提升體感速度
     loadCachedClinicData(); 
 
     loading.value = true;
     uploadStatus.value = `正在讀取 ${newSub} - ${newTitle} 診斷紀錄...`;
 
     try {
-      // 🚩 調用你修正後的 fetchTargetDiagnosis
       await fetchTargetDiagnosis(); 
     } catch (error) {
       console.error("同步失敗:", error);
@@ -1367,10 +1300,9 @@ watch([selectedSubject, selectedTitle], async ([newSub, newTitle], [oldSub, oldT
       loading.value = false;
       uploadStatus.value = "";
     }
-  }, 450); // 給選單連動留出一點緩衝
+  }, 450); 
 });
 
-// --- 🚩 4. Tab 切換體感 (選擇性保留) ---
 watch(activeTab, async () => {
   loading.value = true;
   uploadStatus.value = "讀取報告細節...";
@@ -1382,10 +1314,9 @@ onMounted(async () => {
   const auth = getValidConfig();
   if (!auth) return; 
 
-  handleIncomingQuery(); // 解析 URL
-  await fetchStudentData(true); // 抓題庫
+  handleIncomingQuery(); 
+  await fetchStudentData(true); 
   
-  // 🚩 手動傳入參數，確保這一次執行是穩定且正確的
   fetchTargetDiagnosis({
     subject: selectedSubject.value,
     title: selectedTitle.value
@@ -1414,15 +1345,13 @@ onMounted(async () => {
   animation: loading 2s linear infinite;
 }
 
-/* 動畫進入與離開的過程 */
 .expand-enter-active,
 .expand-leave-active {
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  max-height: 500px; /* 給一個足夠大的高度 */
+  max-height: 500px; 
   overflow: hidden;
 }
 
-/* 動畫開始進入前 & 離開結束後 的狀態 */
 .expand-enter-from,
 .expand-leave-to {
   opacity: 0;
@@ -1442,13 +1371,11 @@ onMounted(async () => {
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* 如果妳沒用 Tailwind 的 spin，補上這個 */
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
 
-/* 如果你還沒定義 fade-in，可以參考這個 */
 .fade-in {
   animation: fadeIn 0.4s ease-out forwards;
 }
@@ -1458,10 +1385,6 @@ onMounted(async () => {
   to { opacity: 1; transform: translateY(0); }
 }
 
-
-
-/*************/
-/* 淡入淡出過渡 */
 .fade-enter-active,
 .fade-leave-active {
   transition: opacity 0.4s cubic-bezier(0.4, 0, 0.2, 1);
@@ -1472,13 +1395,11 @@ onMounted(async () => {
   opacity: 0;
 }
 
-/* 讓藍色轉圈更順滑的動畫 */
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
 
-/* 載入小點的跳動感 */
 @keyframes bounce {
   0%, 100% { transform: translateY(0); opacity: 0.3; }
   50% { transform: translateY(-4px); opacity: 1; }
@@ -1498,7 +1419,6 @@ onMounted(async () => {
   100% { transform: scaleX(1); }
 }
 
-/* 讓分析內容進場有微調感 */
 .fade-in {
   animation: fadeIn 0.6s cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -1509,8 +1429,6 @@ onMounted(async () => {
 }
 
 
-/**/
-/* 遮罩過渡動畫 */
 .overlay-enter-active, .overlay-leave-active {
   transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -1519,14 +1437,12 @@ onMounted(async () => {
   backdrop-filter: blur(0px);
 }
 
-/* 模擬進度條 */
 @keyframes loading {
   0% { transform: translateX(-100%); }
   50% { transform: translateX(0%); }
   100% { transform: translateX(100%); }
 }
 
-/* 基礎淡入 */
 @keyframes fadeIn {
   from { opacity: 0; transform: translateX(-10px); }
   to { opacity: 1; transform: translateX(0); }
@@ -1555,6 +1471,6 @@ onMounted(async () => {
   font-size: 28px;
   font-weight: 800;
   letter-spacing: 1px;
-  color: #d97706; /* 橘黃色警告感 */
+  color: #d97706; 
 }
 </style>
