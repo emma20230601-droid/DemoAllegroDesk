@@ -131,46 +131,36 @@ const isSaved = ref(false);
 const showToast = ref(false);
 const showGeminiKey = ref(false);
 const showCloudinarySecret = ref(false);
-const userConfig = inject('userConfig'); // 🚩 注入全域設定
+const userConfig = inject('userConfig'); 
 const { getValidConfig } = useAuth();
-
 const updateGlobalConfig = inject('updateGlobalConfig');
+const isSaving = ref(false); 
 
-const isSaving = ref(false); // 🚩 新增儲存中狀態
-
-
-// 2. 初始化 config (✨ 已加入 user_gas_url)
 const config = reactive({
   student_id: '', 
   gemini_key: '',
   sheet_id: '',
-  user_gas_url: '', // 🚀 新增：GAS 同步連結
+  user_gas_url: '', 
   cloudinary_name: '',
   cloudinary_api_key: '',
   cloudinary_api_secret: ''
 });
 
-// 3. 載入邏輯
 onMounted(() => {
-  // 1. 從 allegro_config 讀取基礎設定 (Keys, IDs, GAS URL 等)
   const savedConfig = localStorage.getItem('allegro_config');
   if (savedConfig) {
     try {
       const parsed = JSON.parse(savedConfig);
-      // 自動將儲存的內容填入 config 反應式物件
       Object.assign(config, parsed);
       
-      // 確保 user_gas_url 同步到獨立 Key，方便 media.vue 直接讀取
       if (config.user_gas_url) {
         localStorage.setItem('user_gas_url', config.user_gas_url);
       }
-      console.log('✅ 本地設定載入成功');
     } catch (e) {
       console.error('❌ 解析 allegro_config 失敗', e);
     }
   }
 
-  // 2. 🚩 取得 Student ID (用於識別身分，但不發送 API)
   const authSession = localStorage.getItem('allegro_auth_session');
   if (authSession) {
     try {
@@ -181,27 +171,22 @@ onMounted(() => {
     }
   }
 
-  // 3. 備援：如果上面沒抓到，嘗試從全域注入拿
   if (!config.student_id && userConfig?.student_id) {
     config.student_id = userConfig.student_id;
   }
   
-  console.log('📍 目前學生 ID:', config.student_id);
 });
 
-// 4. 儲存邏輯
 const saveSettings = async () => {
   if (isSaving.value) return; 
   
   isSaving.value = true; 
   isSaved.value = false;
 
-  // 1. 同步 Sheet Name
   if (config.sheet_id) {
     config.sheet_name = config.sheet_id; 
   }
 
-  // 2. ✨ 核心儲存邏輯
   localStorage.setItem('allegro_config', JSON.stringify(config));
   
   if (config.user_gas_url) {
@@ -209,15 +194,12 @@ const saveSettings = async () => {
   }
 
   try {
-    // 💡 新增：呼叫 GAS 進行全自動建表
     const auth = getValidConfig();
     const targetSheetName = auth.userName;
     if (config.user_gas_url && targetSheetName) {
-      console.log('🚀 正在初始化雲端試算表分頁...targetSheetName=',targetSheetName);
-      
       const response = await fetch(config.user_gas_url.trim(), {
         method: 'POST',
-        headers: { 'Content-Type': 'text/plain' }, // GAS 習慣接收 text/plain
+        headers: { 'Content-Type': 'text/plain' }, 
         body: JSON.stringify({
           action: 'init_sheets',
           sheetName: targetSheetName
@@ -226,14 +208,14 @@ const saveSettings = async () => {
 
       const result = await response.json();
       if (result.success) {
-        console.log('✅ 雲端分頁初始化成功:', result.message);
+        //console.log('✅ 雲端分頁初始化成功:', result.message);
       } else {
         throw new Error(result.error || '初始化失敗');
       }
     }
 
     await new Promise(resolve => setTimeout(resolve, 600));
-    console.log('✅ 設定已儲存至本地並同步至雲端');
+
 
   } catch (err) {
     console.error('❌ 雲端同步失敗，但本地設定已儲存:', err.message);
