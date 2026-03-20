@@ -75,14 +75,16 @@ export default defineEventHandler(async (event) => {
     return { success: true, data: allQuestions };
 
   } catch (error) {
-  //  console.error('[Assignments API Error]', error);
-  //  return { success: false, error: error.message };
-  if (error.message.includes('429') || error.message.includes('quota')) {
-      return { 
-        success: false, 
-        message: "⚡️ 目前 Vercel 伺服器人次過多（API 限額），請 1 分鐘後再試。" 
-      };
-    }
+    //console.error('[Assignments API Error]', error);
+    //return { success: false, error: error.message };
+    if (error.message.includes('429') || error.message.includes('quota')) {
+    return { 
+      success: false, 
+      message: "⚡️ 目前 Vercel 伺服器人次過多（API 限額），請 1 分鐘後再試。" 
+    };
+  }
+  throw error;
+  }
 });
 // ✨ 修正：在參數列加入 existingQuestions = [] (預設值防止未傳入時報錯)
 async function analyzeExamPaper(imageB64, index, model, mode = 'manual', subject = '樂理') {
