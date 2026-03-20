@@ -1081,6 +1081,38 @@ const saveRecord = async () => {
   const tabName = config.userName; 
 
   loading.value = true;
+
+  const compressImage = async (base64Str) => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.src = base64Str;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 1000; 
+        let width = img.width;
+        let height = img.height;
+        if (width > MAX_WIDTH) {
+          height *= MAX_WIDTH / width;
+          width = MAX_WIDTH;
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.7).split(',')[1]);
+      };
+      img.onerror = () => {
+          console.error("圖片壓縮失敗");
+          resolve(base64Str.split(',')[1] || base64Str); // 失敗就傳原圖
+        };
+    });
+  };
+
+  // 執行壓縮
+  const compressedBatch = await Promise.all(
+    imageFiles.value.map(img => compressImage(img))
+  );
+
   uploadStatus.value = gradingMode.value === 'ai' ? 'AI 批改中...' : 'AI 診斷中...';
 
   try {
@@ -1088,12 +1120,34 @@ const saveRecord = async () => {
       method: 'POST',
       body: { 
         action: 'upload', 
-        imageBatch: imageFiles.value, 
+        imageBatch: compressedBatch, 
         subject: selectedSubject.value,
         mode: gradingMode.value,
         userConfig: config 
       }
+    }).catch(err => {
+      // 捕捉 429 錯誤
+      const rawMsg = err.data?.message || err.message || "";
+      if (rawMsg.includes('429') || rawMsg.includes('quota')) {
+        return { 
+          success: false, 
+          isQuotaError: true, 
+          message: '⚡️ AI 能量耗盡（額度上限），請 1 分鐘後再試，或更換模型。' 
+        };
+      }
+      return { success: false, message: rawMsg };
     });
+
+    if (!res.success) {
+      if (res.isQuotaError) {
+        triggerAlert(res.message); 
+      } else {
+        showAlert("辨識失敗", res.message, "error");
+      }
+      loading.value = false;
+      return;
+    };
+
     if (res.success && res.data) {
       const rowsToSave = res.data.map(item => ({
         id: `task-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
