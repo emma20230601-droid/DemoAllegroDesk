@@ -59,9 +59,14 @@ export default defineEventHandler(async (event) => {
 
     for (let i = 0; i < imageBatch.length; i++) {
       if (i > 0) await sleep(2000); 
-      const res = await cloudinary.uploader.upload(imageBatch[i], { folder: 'allegro_theory' });
-      const questionsFromImage = await analyzeExamPaper(imageBatch[i], i, model, body.mode, subject); 
       
+    
+      const base64ForCloudinary = `data:image/jpeg;base64,${imageBatch[i]}`;
+      const res = await cloudinary.uploader.upload(base64ForCloudinary, { folder: 'allegro_theory' });
+      
+    
+      const questionsFromImage = await analyzeExamPaper(imageBatch[i], i, model, body.mode, subject);
+          
       if (Array.isArray(questionsFromImage)) {
         questionsFromImage.forEach(q => {
           if (!seenNumbers.includes(String(q.num))) {
@@ -75,18 +80,11 @@ export default defineEventHandler(async (event) => {
     return { success: true, data: allQuestions };
 
   } catch (error) {
-    //console.error('[Assignments API Error]', error);
-    //return { success: false, error: error.message };
-    if (error.message.includes('429') || error.message.includes('quota')) {
-    return { 
-      success: false, 
-      message: "⚡️ 目前 Vercel 伺服器人次過多（API 限額），請 1 分鐘後再試。" 
-    };
-  }
-  throw error;
+    console.error('[Assignments API Error]', error);
+    return { success: false, error: error.message };
   }
 });
-// ✨ 修正：在參數列加入 existingQuestions = [] (預設值防止未傳入時報錯)
+
 async function analyzeExamPaper(imageB64, index, model, mode = 'manual', subject = '樂理') {
 
   const current = subjectLibrary[subject] || subjectLibrary['樂理'];
@@ -131,9 +129,14 @@ async function analyzeExamPaper(imageB64, index, model, mode = 'manual', subject
   ]
 }`;
 
-  const result = await model.generateContent([
+const result = await model.generateContent([
     prompt,
-    { inlineData: { data: imageB64.split(',')[1], mimeType: "image/jpeg" } }
+    { 
+      inlineData: { 
+        data: imageB64, 
+        mimeType: "image/jpeg" 
+      } 
+    }
   ]);
 
   const response = await result.response;
@@ -148,17 +151,3 @@ async function analyzeExamPaper(imageB64, index, model, mode = 'manual', subject
   }
 }
 
-// 🚿 文字清洗工具：專門處理社會科等長文字斷行問題
-function cleanOcrText(text) {
-  if (!text) return '';
-  return text
-    // 1. 移除中文字與中文字之間的斷行（處理社會科裁切後的碎裂感）
-    .replace(/([\u4e00-\u9fa5,，。？！、])\n+([\u4e00-\u9fa5])/g, '$1$2')
-    // 2. 移除重複出現的疊字（OCR 常見錯誤，如：什麼 麼 -> 什麼）
-    .replace(/([^ \n])\n+(?=\1)/g, '')
-    // 3. 確保選項 ①②③④ 前面有換行，後方有一個空格，讓 Excel 閱讀舒適
-    .replace(/\s*([①-⑩])\s*/g, '\n$1 ')
-    // 4. 移除多餘的連續空格
-    .replace(/ +/g, ' ')
-    .trim();
-}
