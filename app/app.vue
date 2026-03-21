@@ -86,6 +86,36 @@
         </button>
 
       </div>
+<div class="flex flex-col gap-3 items-center w-full">
+  <button 
+    @click="fillDemoData" 
+    class="w-full py-6 px-8 rounded-2xl border border-amber-200 bg-white hover:bg-amber-50/50 hover:border-amber-300 transition-all duration-300 group shadow-[0_10px_30px_-10px_rgba(251,191,36,0.1)] hover:shadow-[0_15px_40px_-10px_rgba(251,191,36,0.2)] hover:-translate-y-0.5 active:scale-[0.98] active:shadow-sm"
+  >
+    <div class="flex items-center justify-center gap-3 mb-3">
+      <svg class="w-5 h-5 text-amber-500 group-hover:scale-110 transition-transform" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M10 16H14V18H10V16Z" fill="currentColor"/>
+        <path d="M10 12H14V14H10V12Z" fill="currentColor"/>
+        <path d="M10 8H14V10H10V8Z" fill="currentColor"/>
+        <path fill-rule="evenodd" clip-rule="evenodd" d="M3 4C3 2.89543 3.89543 2 5 2H19C20.1046 2 21 2.89543 21 4V20C21 21.1046 20.1046 22 19 22H5C3.89543 22 3 21.1046 3 20V4ZM5 4V20H19V4H5Z" fill="currentColor"/>
+      </svg>
+      <span class="text-[16px] font-black text-amber-950 tracking-[0.2em] uppercase">
+        訪客唯讀模式
+      </span>
+    </div>
+    
+    <div class="flex flex-col items-center gap-2 border-t border-amber-100 pt-3 mt-1">
+      <p class="text-[13px] text-amber-800 font-medium leading-relaxed tracking-wider">
+        可瀏覽 Sheet 雲端數據內容
+      </p>
+      <div class="flex items-center gap-2">
+        <span class="text-[14px]">⚠️</span>
+        <p class="text-[11px] text-red-600 font-bold tracking-widest uppercase bg-red-50 px-3 py-1 rounded-full">
+          AI 診療與圖片分析功能不開放
+        </p>
+      </div>
+    </div>
+  </button>
+</div>
     </div>
 
     <p class="mt-14 text-[9px] text-[#DDDDDD] tracking-widest uppercase">Authorized Access Only</p>
@@ -339,16 +369,17 @@ const handleLogin = async () => {
       const cellValue = row.c[4]?.v; // 第 5 欄
       return cellValue && cellValue.toString().toLowerCase() === code;
     });
-
+console.log('userRow:', userRow);
     if (userRow) {
       // 提取資料 (c[0]=id, c[1]=name, c[3]=role)
+      console.log('抓到的原始 Row 資料:', userRow.c.map(cell => cell?.v));
       const user = {
         id: userRow.c[0]?.v || '',
         name: userRow.c[1]?.v || '',
         role: userRow.c[3]?.v || 'student',
         sheet_id: sheetId
       };
-      
+      console.log('準備登入的用戶資料：', user); // <--- 加這行
       handleLoginSuccess(user);
     } else {
       showAlert('登入失敗', '找不到匹配的登入代碼，請重新確認。', 'error');
@@ -415,7 +446,29 @@ const logout = () => {
     cancelButtonText: '繼續學習'
   }).then((result) => {
     if (result.isConfirmed) {
-      localStorage.removeItem('allegro_auth_session'); 
+      // 1. 先抓出目前的設定檔來檢查
+      const configRaw = localStorage.getItem('allegro_config');
+      let isDemoUser = false;
+
+      if (configRaw) {
+        const config = JSON.parse(configRaw);
+        isDemoUser = config.is_demo === true; // 👈 檢查是不是訪客
+      }
+
+      // 2. 執行清除動作
+      if (isDemoUser) {
+        // 🚨 如果是訪客：全清 (包括假 Key 和假 GAS URL)
+        localStorage.removeItem('allegro_config');
+        localStorage.removeItem('user_gas_url');
+        console.log("🧹 訪客資料已徹底清空");
+      } else {
+        // ✅ 如果是一般使用者：只清 Session (保留 API Key 等設定)
+        console.log("💾 一般使用者，保留配置檔案");
+      }
+
+      // 3. 不管是誰都要清掉 Session 才能回到登入頁
+      localStorage.removeItem('allegro_auth_session');
+      
       isLoggedIn.value = false;
       window.location.replace('/'); 
     }
@@ -488,6 +541,48 @@ const subjectConfigs = {
 provide('subjectConfigs', subjectConfigs);
 
 const userName = ref('');
+
+
+const fillDemoData = async () => {
+  try {
+    showToast('✨ 啟動訪客試用模式...');
+
+    const demoData = {
+
+      sheet_id: '1F4kU4c7N-k4uwWkmSWf1RWkgL1V_huH8g6UzDGoYCFY',
+      user_gas_url: 'https://script.google.com/macros/s/AKfycbxhMHiRyIdAML6gKS5oy0Us43ubMB0qW3gknf7YGPxy3-eTBTnv6_vQHpBYyf1LOZ7o/exec',
+      
+
+      gemini_key: 'AIzaSy_Demo_Key_For_Visitor_Use_Only', 
+      gemini_model: 'gemini-1.5-flash',
+      cloudinary_name: 'demo_user',
+      cloudinary_api_key: '1234567890',
+      cloudinary_api_secret: 'shhh_its_a_secret',
+      is_demo: true
+    };
+
+  
+    loginInput.value = 'G202603';
+    loginSheetId.value = demoData.sheet_id;
+
+
+    const existingConfig = JSON.parse(localStorage.getItem('allegro_config') || '{}');
+    const finalConfig = { ...existingConfig, ...demoData };
+
+    localStorage.setItem('allegro_config', JSON.stringify(finalConfig));
+    localStorage.setItem('user_gas_url', demoData.user_gas_url);
+
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    await handleLogin();
+
+    showToast('✅ 試用環境配置完成！');
+  } catch (e) {
+    console.error('試用模式崩潰:', e);
+    alert('試用模式設定失敗: ' + e.message);
+  }
+};
+
 watch(isLoggedIn, (newVal) => {
   if (newVal) {
     const session = JSON.parse(localStorage.getItem('allegro_auth_session') || '{}');
