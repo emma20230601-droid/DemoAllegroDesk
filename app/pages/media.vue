@@ -587,9 +587,28 @@ const handlePhotoUpload = async (event) => {
     }
   } catch (e) {
     console.error("辨識失敗:", e);
-    // 如果還是 413，給予具體提示
-    const errorMsg = e.response?.status === 413 ? "圖片檔案過大，請嘗試減少張數或縮小照片" : (e.message || "請檢查網路");
-    showAlert('辨識失敗', errorMsg, 'error');
+    
+    let friendlyMsg = "請檢查網路連線或稍後再試";
+    const rawError = e.toString(); // 捕捉錯誤字串
+
+    // 1. 處理 413 檔案過大
+    if (e.response?.status === 413 || rawError.includes("413")) {
+      friendlyMsg = "圖片檔案過大，請嘗試減少張數或縮小照片。";
+    } 
+    // 2. 處理 429 額度上限
+    else if (rawError.includes("429") || rawError.includes("quota") || rawError.includes("Too Many Requests")) {
+      friendlyMsg = "AI 診療室目前太擁擠（免費額度已滿），請等 1 分鐘後再試，或於設定頁更換 API Key。";
+    } 
+    // 3. 處理 API Key 無效
+    else if (rawError.includes("API_KEY_INVALID") || rawError.includes("403")) {
+      friendlyMsg = "API Key 無效或已過期，請前往設定頁面重新檢查。";
+    }
+    // 4. 其他一般錯誤
+    else {
+      friendlyMsg = e.message || "連線發生異常";
+    }
+
+    showAlert('辨識失敗', friendlyMsg, 'error');
     
   } finally {
     isAnalyzing.value = false;
