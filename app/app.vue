@@ -369,17 +369,15 @@ const handleLogin = async () => {
       const cellValue = row.c[4]?.v; // 第 5 欄
       return cellValue && cellValue.toString().toLowerCase() === code;
     });
-console.log('userRow:', userRow);
+
     if (userRow) {
       // 提取資料 (c[0]=id, c[1]=name, c[3]=role)
-      console.log('抓到的原始 Row 資料:', userRow.c.map(cell => cell?.v));
       const user = {
         id: userRow.c[0]?.v || '',
         name: userRow.c[1]?.v || '',
         role: userRow.c[3]?.v || 'student',
         sheet_id: sheetId
       };
-      console.log('準備登入的用戶資料：', user); // <--- 加這行
       handleLoginSuccess(user);
     } else {
       showAlert('登入失敗', '找不到匹配的登入代碼，請重新確認。', 'error');
