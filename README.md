@@ -29,9 +29,13 @@
 在左側檔案選單中找到 .env.example。
 按右鍵選擇 Rename (重新命名)，將檔名改為 .env（前面的點不能掉喔！）。
 打開 .env 檔案，將您的金鑰填入後方的引號內：
+
 NUXT_GEMINI_API_KEY: 填入您的 Gemini API Key。
+
 NUXT_GOOGLE_SHEET_ID: 填入您的 Google 試算表 ID。
+
 NUXT_CLOUDINARY_...: 填入您的圖床金鑰（若需上傳考卷照片）。
+
 💡 如何找到 Google Sheet ID？
 打開您的試算表，網址中 https://docs.google.com/spreadsheets/d/ 之後到下一個斜線 / 之前的那串長代碼就是 ID！
 
