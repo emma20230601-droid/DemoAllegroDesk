@@ -13,7 +13,7 @@
 1. 點擊本頁面上方的綠色按鈕 **[<> Code]**。
 2. 選擇 **[Download ZIP]** 並解壓縮，或使用 Git 指令：
    ```bash
-   git clone [https://github.com/您的帳號/allegro-desk.git](https://github.com/您的帳號/allegro-desk.git)
+   git clone https://github.com/emma20230601-droid/DemoAllegroDesk.git
 
 3️⃣ 安裝零件 (Dependencies)
 這一步是讓電腦把執行程式所需的「小零件」全部找齊。
